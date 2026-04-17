@@ -16,6 +16,10 @@ class WavetableSynthesizerViewModel : ViewModel() {
             applyParameters()
         }
 
+    private fun applyParameters() {
+        TODO("Not yet implemented")
+    }
+
     private val _frequency = MutableLiveData(300F)
     val frequency: LiveData<Float>
         get() {
