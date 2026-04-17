@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">RhythmTrainer</string>
+    <string name="wavetable">Wavetable</string>
+    <string name="frequency">Frequency</string>
+    <string name="frequency_value">%.1f Hz</string>
+    <string name="play">Play</string>
+    <string name="sine">Sine</string>
+    <string name="trianlge">Triangle</string>
+    <string name="square">Square</string>
+    <string name="saw">Saw</string>
+</resources>
