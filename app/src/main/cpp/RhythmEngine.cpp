@@ -1,6 +1,7 @@
 #include "RhythmEngine.h"
 #include <android/log.h>
 #include <cmath>
+#include <chrono>
 
 #define LOG_TAG "RhythmEngine"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
@@ -53,13 +54,11 @@ void RhythmEngine::restartStream() {
 
     LOGD("Restarting stream with new BPM=%d", mCurrentBpm.load());
 
-    // Останавливаем текущий поток
     if (mStream) {
         mStream->stop();
         closeStream();
     }
 
-    // Пересоздаём поток с новыми параметрами
     mFrameCounter = 0;
     mClickPosition = 0;
 
@@ -89,17 +88,16 @@ void RhythmEngine::restartStream() {
 }
 
 void RhythmEngine::start(int bpm) {
-    LOGD("start() called, BPM=%d, current playing state: %d", bpm, mIsPlaying.load());
+    LOGD("start() called, BPM=%d", bpm);
 
     setBpm(bpm);
+    resetGame();
 
     if (mIsPlaying) {
-        LOGD("Already playing, restarting with new BPM");
         restartStream();
         return;
     }
 
-    LOGD("Creating audio stream...");
     oboe::AudioStreamBuilder builder;
     builder.setDirection(oboe::Direction::Output);
     builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
@@ -125,7 +123,8 @@ void RhythmEngine::start(int bpm) {
     mIsPlaying = true;
     mFrameCounter = 0;
     mClickPosition = 0;
-    LOGD("Rhythm started successfully, BPM=%d", mCurrentBpm.load());
+    mGameStartTime = getCurrentTimeMs();
+    LOGD("Rhythm started successfully, BPM=%d, gameStartTime=%lld", mCurrentBpm.load(), mGameStartTime.load());
 }
 
 void RhythmEngine::stop() {
@@ -149,14 +148,76 @@ void RhythmEngine::closeStream() {
     }
 }
 
+void RhythmEngine::resetGame() {
+    mCurrentScore = 0;
+    LOGD("Game reset, score=%d", mCurrentScore.load());
+}
+
+void RhythmEngine::setScoreUpdateCallback(std::function<void(int, const char*)> callback) {
+    mScoreCallback = callback;
+}
+
+long long RhythmEngine::getCurrentTimeMs() const {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()
+    ).count();
+}
+
+const char* RhythmEngine::getResultText(int deviationMs) {
+    int absDev = std::abs(deviationMs);
+    if (absDev <= 30) return "Perfect!";
+    if (absDev <= 70) return "Good!";
+    return "Miss...";
+}
+
+int RhythmEngine::calculateScore(int deviationMs) {
+    int absDev = std::abs(deviationMs);
+    if (absDev <= 30) return 10;
+    if (absDev <= 70) return 5;
+    return 0;
+}
+
+void RhythmEngine::processTap(long long tapTimeMs) {
+    if (!mIsPlaying) {
+        LOGD("Tap ignored - game not playing");
+        return;
+    }
+
+    long long elapsed = tapTimeMs - mGameStartTime;
+    long long beatDurationMs = (60 * 1000) / mCurrentBpm;
+
+    // Находим ближайшую ноту
+    long long beatNumber = (elapsed + beatDurationMs / 2) / beatDurationMs;
+    long long idealTimeMs = beatNumber * beatDurationMs;
+    int deviationMs = (int)(elapsed - idealTimeMs);
+
+    int score = calculateScore(deviationMs);
+    const char* resultText = getResultText(deviationMs);
+
+    if (score > 0) {
+        mCurrentScore += score;
+    }
+
+    LOGD("Tap: elapsed=%lld, ideal=%lld, dev=%d, result=%s, score=%d, total=%d",
+         elapsed, idealTimeMs, deviationMs, resultText, score, mCurrentScore.load());
+
+    if (mScoreCallback) {
+        mScoreCallback(mCurrentScore.load(), resultText);
+    }
+}
+
+void RhythmEngine::onTap() {
+    long long tapTime = getCurrentTimeMs();
+    LOGD("onTap() called at %lld", tapTime);
+    processTap(tapTime);
+}
+
 oboe::DataCallbackResult RhythmEngine::onAudioReady(
         oboe::AudioStream* oboeStream,
         void* audioData,
         int32_t numFrames) {
 
     if (mNeedsRestart) {
-        // Отметим, что нужен рестарт, но не делаем его здесь (нельзя блокировать)
-        // В следующем цикле main поток должен вызвать restartStream()
         return oboe::DataCallbackResult::Continue;
     }
 

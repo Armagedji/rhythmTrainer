@@ -1,6 +1,10 @@
 package com.example.rhythmtrainer
 
+import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -30,6 +34,8 @@ class MainActivity : ComponentActivity() {
         private const val TAG = "MainActivity"
     }
 
+    private var vibrator: Vibrator? = null
+
     init {
         try {
             System.loadLibrary("rhythmtrainer")
@@ -40,16 +46,66 @@ class MainActivity : ComponentActivity() {
     }
 
     // Нативные функции
+    private external fun nativeInit()
     private external fun startRhythm(bpm: Int)
     private external fun stopRhythm()
+    private external fun onTap()
     private external fun isRhythmPlaying(): Boolean
+
+    // MutableState для UI
+    private val _score = mutableStateOf(0)
+    private val _lastResult = mutableStateOf("")
+    private val _vibrationEnabled = mutableStateOf(true)
+
+    // Callback'и из C++
+    @Suppress("unused")
+    fun updateScore(score: Int) {
+        runOnUiThread {
+            Log.d(TAG, "updateScore: $score")
+            _score.value = score
+        }
+    }
+
+    @Suppress("unused")
+    fun updateResult(result: String) {
+        runOnUiThread {
+            Log.d(TAG, "updateResult: $result")
+            _lastResult.value = result
+            if (_vibrationEnabled.value && result != "Miss..." && result.isNotEmpty()) {
+                vibrateDevice()
+            }
+        }
+    }
+
+    private fun vibrateDevice() {
+        val vibratorInstance = vibrator ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibratorInstance.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+            @Suppress("DEPRECATION")
+            vibratorInstance.vibrate(50)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Log.d(TAG, "onCreate called")
+
+        vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vibratorManager = getSystemService(VIBRATOR_MANAGER_SERVICE) as VibratorManager
+            vibratorManager.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(VIBRATOR_SERVICE) as Vibrator
+        }
+
+        nativeInit()
+
         setContent {
             RhythmTrainerTheme {
                 NavigationHost(
+                    score = _score.value,
+                    lastResult = _lastResult.value,
+                    vibrationEnabled = _vibrationEnabled.value,
                     onStartRhythm = { bpm ->
                         Log.d(TAG, "onStartRhythm lambda called with BPM=$bpm")
                         startRhythm(bpm)
@@ -57,6 +113,15 @@ class MainActivity : ComponentActivity() {
                     onStopRhythm = {
                         Log.d(TAG, "onStopRhythm lambda called")
                         stopRhythm()
+                        _score.value = 0
+                        _lastResult.value = ""
+                    },
+                    onTap = {
+                        Log.d(TAG, "onTap called")
+                        onTap()
+                    },
+                    onVibrationChanged = { enabled ->
+                        _vibrationEnabled.value = enabled
                     }
                 )
             }
@@ -74,8 +139,13 @@ sealed class Screen(val title: String) {
 
 @Composable
 fun NavigationHost(
+    score: Int,
+    lastResult: String,
+    vibrationEnabled: Boolean,
     onStartRhythm: (bpm: Int) -> Unit,
-    onStopRhythm: () -> Unit
+    onStopRhythm: () -> Unit,
+    onTap: () -> Unit,
+    onVibrationChanged: (Boolean) -> Unit
 ) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.MainMenu) }
     var currentBpm by remember { mutableStateOf(80) }
@@ -96,6 +166,8 @@ fun NavigationHost(
                     onBack = { currentScreen = Screen.MainMenu }
                 )
                 Screen.Settings -> SettingsScreen(
+                    vibrationEnabled = vibrationEnabled,
+                    onVibrationChanged = onVibrationChanged,
                     onBack = { currentScreen = Screen.MainMenu }
                 )
                 Screen.LevelSelect -> LevelSelectScreen(
@@ -108,10 +180,11 @@ fun NavigationHost(
                 )
                 is Screen.Game -> {
                     val gameScreen = currentScreen as Screen.Game
-                    Log.d("NavigationHost", "Showing GameScreen for level ${gameScreen.levelId}, BPM=${gameScreen.bpm}")
                     GameScreen(
                         levelId = gameScreen.levelId,
                         bpm = gameScreen.bpm,
+                        score = score,
+                        lastResult = lastResult,
                         onBack = {
                             Log.d("NavigationHost", "GameScreen onBack called")
                             onStopRhythm()
@@ -120,7 +193,8 @@ fun NavigationHost(
                         onStartRhythm = {
                             Log.d("NavigationHost", "GameScreen onStartRhythm called with BPM=${gameScreen.bpm}")
                             onStartRhythm(gameScreen.bpm)
-                        }
+                        },
+                        onTap = onTap
                     )
                 }
             }
@@ -158,9 +232,9 @@ fun LearningScreen(onBack: () -> Unit) {
                     "Ритм – это чередование звуков разной длительности.\n\n" +
                     "В этом приложении вы будете нажимать на экран в такт музыке.\n\n" +
                     "Точность нажатий оценивается как:\n" +
-                    "• Perfect – идеальное попадание\n" +
-                    "• Good – небольшое отклонение\n" +
-                    "• Miss – промах\n\n" +
+                    "• Perfect – идеальное попадание (+10 очков)\n" +
+                    "• Good – небольшое отклонение (+5 очков)\n" +
+                    "• Miss – промах (0 очков)\n\n" +
                     "Начинайте с простых уровней и постепенно усложняйте!",
             fontSize = 16.sp
         )
@@ -171,9 +245,12 @@ fun LearningScreen(onBack: () -> Unit) {
 }
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(
+    vibrationEnabled: Boolean,
+    onVibrationChanged: (Boolean) -> Unit,
+    onBack: () -> Unit
+) {
     var soundEnabled by remember { mutableStateOf(true) }
-    var vibrationEnabled by remember { mutableStateOf(true) }
     var calibrationOffset by remember { mutableStateOf(0) }
 
     Column(
@@ -183,7 +260,7 @@ fun SettingsScreen(onBack: () -> Unit) {
         Button(onClick = { soundEnabled = !soundEnabled }) {
             Text("Звук: ${if (soundEnabled) "Вкл" else "Выкл"}")
         }
-        Button(onClick = { vibrationEnabled = !vibrationEnabled }) {
+        Button(onClick = { onVibrationChanged(!vibrationEnabled) }) {
             Text("Вибрация: ${if (vibrationEnabled) "Вкл" else "Выкл"}")
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -233,12 +310,13 @@ fun LevelSelectScreen(onBack: () -> Unit, onLevelSelected: (levelId: Int, bpm: I
 fun GameScreen(
     levelId: Int,
     bpm: Int,
+    score: Int,
+    lastResult: String,
     onBack: () -> Unit,
-    onStartRhythm: () -> Unit
+    onStartRhythm: () -> Unit,
+    onTap: () -> Unit
 ) {
     var isPlaying by remember { mutableStateOf(false) }
-    var score by remember { mutableStateOf(0) }
-    var lastResult by remember { mutableStateOf("") }
 
     Column(
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -248,22 +326,23 @@ fun GameScreen(
         Text(
             text = "Уровень $levelId\nBPM: $bpm\n\n" +
                     "Счёт: $score\n\n" +
-                    "Последнее нажатие: $lastResult\n\n" +
-                    "Статус: ${if (isPlaying) "Ритм играет" else "Ритм остановлен"}",
-            fontSize = 18.sp
+                    "Результат: $lastResult\n\n" +
+                    "Статус: ${if (isPlaying) "🎵 Ритм играет" else "⏸ Ритм остановлен"}",
+            fontSize = 20.sp
         )
 
         Button(
             onClick = {
                 Log.d("GameScreen", "Main tap button clicked")
-                // Здесь будет логика игры
-                lastResult = "Нажатие зарегистрировано"
+                if (isPlaying) {
+                    onTap()
+                }
             },
             modifier = Modifier
                 .fillMaxWidth(0.8f)
                 .height(120.dp)
         ) {
-            Text("Нажми в ритм!", fontSize = 24.sp)
+            Text("👆 Нажми в ритм!", fontSize = 24.sp)
         }
 
         Button(
@@ -272,12 +351,11 @@ fun GameScreen(
                 if (!isPlaying) {
                     onStartRhythm()
                     isPlaying = true
-                    lastResult = "Ритм запущен!"
                 }
             },
             modifier = Modifier.fillMaxWidth(0.8f)
         ) {
-            Text(if (isPlaying) "Ритм играет" else "Запустить ритм", fontSize = 18.sp)
+            Text(if (isPlaying) "🔊 Ритм играет" else "▶ Запустить ритм", fontSize = 18.sp)
         }
 
         Button(onClick = {
@@ -285,7 +363,7 @@ fun GameScreen(
             isPlaying = false
             onBack()
         }) {
-            Text("Выйти")
+            Text("🚪 Выйти")
         }
     }
 }
