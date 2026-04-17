@@ -39,7 +39,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private external fun startRhythm()
+    // Нативные функции
+    private external fun startRhythm(bpm: Int)
     private external fun stopRhythm()
     private external fun isRhythmPlaying(): Boolean
 
@@ -49,9 +50,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             RhythmTrainerTheme {
                 NavigationHost(
-                    onStartRhythm = {
-                        Log.d(TAG, "onStartRhythm lambda called")
-                        startRhythm()
+                    onStartRhythm = { bpm ->
+                        Log.d(TAG, "onStartRhythm lambda called with BPM=$bpm")
+                        startRhythm(bpm)
                     },
                     onStopRhythm = {
                         Log.d(TAG, "onStopRhythm lambda called")
@@ -68,16 +69,16 @@ sealed class Screen(val title: String) {
     object Learning : Screen("Обучение")
     object Settings : Screen("Настройки")
     object LevelSelect : Screen("Выбор уровня")
-    object Game : Screen("Тренировка")
+    data class Game(val levelId: Int, val bpm: Int) : Screen("Тренировка")
 }
 
 @Composable
 fun NavigationHost(
-    onStartRhythm: () -> Unit,
+    onStartRhythm: (bpm: Int) -> Unit,
     onStopRhythm: () -> Unit
 ) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.MainMenu) }
-    var isPlaying by remember { mutableStateOf(false) }
+    var currentBpm by remember { mutableStateOf(80) }
 
     Scaffold { paddingValues ->
         Column(
@@ -99,24 +100,29 @@ fun NavigationHost(
                 )
                 Screen.LevelSelect -> LevelSelectScreen(
                     onBack = { currentScreen = Screen.MainMenu },
-                    onLevelSelected = { levelId ->
-                        Log.d("NavigationHost", "Level selected: $levelId, navigating to Game")
-                        currentScreen = Screen.Game
+                    onLevelSelected = { levelId, bpm ->
+                        Log.d("NavigationHost", "Level selected: id=$levelId, BPM=$bpm")
+                        currentBpm = bpm
+                        currentScreen = Screen.Game(levelId, bpm)
                     }
                 )
-                Screen.Game -> GameScreen(
-                    onBack = {
-                        Log.d("NavigationHost", "GameScreen onBack called")
-                        onStopRhythm()
-                        currentScreen = Screen.MainMenu
-                    },
-                    onStartRhythm = {
-                        Log.d("NavigationHost", "GameScreen onStartRhythm called")
-                        onStartRhythm()
-                        isPlaying = true
-                    },
-                    isPlaying = isPlaying
-                )
+                is Screen.Game -> {
+                    val gameScreen = currentScreen as Screen.Game
+                    Log.d("NavigationHost", "Showing GameScreen for level ${gameScreen.levelId}, BPM=${gameScreen.bpm}")
+                    GameScreen(
+                        levelId = gameScreen.levelId,
+                        bpm = gameScreen.bpm,
+                        onBack = {
+                            Log.d("NavigationHost", "GameScreen onBack called")
+                            onStopRhythm()
+                            currentScreen = Screen.MainMenu
+                        },
+                        onStartRhythm = {
+                            Log.d("NavigationHost", "GameScreen onStartRhythm called with BPM=${gameScreen.bpm}")
+                            onStartRhythm(gameScreen.bpm)
+                        }
+                    )
+                }
             }
         }
     }
@@ -194,11 +200,11 @@ fun SettingsScreen(onBack: () -> Unit) {
 }
 
 @Composable
-fun LevelSelectScreen(onBack: () -> Unit, onLevelSelected: (Int) -> Unit) {
+fun LevelSelectScreen(onBack: () -> Unit, onLevelSelected: (levelId: Int, bpm: Int) -> Unit) {
     val levels = listOf(
-        LevelInfo(1, "Уровень 1: Четверти", "BPM: 80"),
-        LevelInfo(2, "Уровень 2: Восьмые", "BPM: 90"),
-        LevelInfo(3, "Уровень 3: Паузы", "BPM: 100")
+        LevelInfo(1, "Уровень 1: Четверти", "BPM: 80", 80),
+        LevelInfo(2, "Уровень 2: Восьмые", "BPM: 100", 100),
+        LevelInfo(3, "Уровень 3: Паузы", "BPM: 120", 120)
     )
 
     Column(
@@ -208,7 +214,7 @@ fun LevelSelectScreen(onBack: () -> Unit, onLevelSelected: (Int) -> Unit) {
     ) {
         levels.forEach { level ->
             Button(
-                onClick = { onLevelSelected(level.id) },
+                onClick = { onLevelSelected(level.id, level.bpm) },
                 modifier = Modifier.fillMaxWidth(0.8f)
             ) {
                 Column {
@@ -225,26 +231,33 @@ fun LevelSelectScreen(onBack: () -> Unit, onLevelSelected: (Int) -> Unit) {
 
 @Composable
 fun GameScreen(
+    levelId: Int,
+    bpm: Int,
     onBack: () -> Unit,
-    onStartRhythm: () -> Unit,
-    isPlaying: Boolean
+    onStartRhythm: () -> Unit
 ) {
+    var isPlaying by remember { mutableStateOf(false) }
+    var score by remember { mutableStateOf(0) }
+    var lastResult by remember { mutableStateOf("") }
+
     Column(
         verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.fillMaxSize()
     ) {
         Text(
-            text = "Тренировка\n\n" +
-                    "Слушайте ритм и нажимайте на экран в такт!\n\n" +
-                    "Старайтесь попадать в ритм для получения очков.\n\n" +
+            text = "Уровень $levelId\nBPM: $bpm\n\n" +
+                    "Счёт: $score\n\n" +
+                    "Последнее нажатие: $lastResult\n\n" +
                     "Статус: ${if (isPlaying) "Ритм играет" else "Ритм остановлен"}",
             fontSize = 18.sp
         )
 
         Button(
             onClick = {
-                Log.d("GameScreen", "Main tap button clicked, isPlaying=$isPlaying")
+                Log.d("GameScreen", "Main tap button clicked")
+                // Здесь будет логика игры
+                lastResult = "Нажатие зарегистрировано"
             },
             modifier = Modifier
                 .fillMaxWidth(0.8f)
@@ -257,8 +270,9 @@ fun GameScreen(
             onClick = {
                 Log.d("GameScreen", "Start/Stop button clicked, isPlaying=$isPlaying")
                 if (!isPlaying) {
-                    Log.d("GameScreen", "Calling onStartRhythm")
                     onStartRhythm()
+                    isPlaying = true
+                    lastResult = "Ритм запущен!"
                 }
             },
             modifier = Modifier.fillMaxWidth(0.8f)
@@ -268,6 +282,7 @@ fun GameScreen(
 
         Button(onClick = {
             Log.d("GameScreen", "Exit button clicked")
+            isPlaying = false
             onBack()
         }) {
             Text("Выйти")
@@ -275,4 +290,4 @@ fun GameScreen(
     }
 }
 
-data class LevelInfo(val id: Int, val name: String, val description: String)
+data class LevelInfo(val id: Int, val name: String, val description: String, val bpm: Int)

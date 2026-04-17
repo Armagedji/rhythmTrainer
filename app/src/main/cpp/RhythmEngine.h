@@ -5,14 +5,17 @@
 #include <atomic>
 #include <thread>
 #include <vector>
+#include <functional>
 
 class RhythmEngine : public oboe::AudioStreamDataCallback {
 public:
     static RhythmEngine* getInstance();
 
-    void start();
+    void start(int bpm = 120);
     void stop();
     bool isPlaying() const { return mIsPlaying; }
+    void setBpm(int bpm);
+    int getBpm() const { return mCurrentBpm; }
 
     // AudioStreamDataCallback interface
     oboe::DataCallbackResult onAudioReady(
@@ -26,17 +29,18 @@ private:
 
     void generateClickBuffer();
     void closeStream();
+    void restartStream();
 
     std::shared_ptr<oboe::AudioStream> mStream;
     std::vector<float> mClickBuffer;
     int32_t mClickPosition = 0;
     int32_t mFrameCounter = 0;
-    int32_t mBeatsPerBar = 4;
     std::atomic<bool> mIsPlaying{false};
+    std::atomic<int> mCurrentBpm{120};
+    std::atomic<bool> mNeedsRestart{false};
 
     static constexpr int32_t SAMPLE_RATE = 48000;
-    static constexpr int32_t BPM = 120;
-    static constexpr int32_t BEAT_DURATION_FRAMES = (60 * SAMPLE_RATE) / BPM;
+    int32_t getBeatDurationFrames() const { return (60 * SAMPLE_RATE) / mCurrentBpm; }
 };
 
 #endif // RHYTHMENGINE_H

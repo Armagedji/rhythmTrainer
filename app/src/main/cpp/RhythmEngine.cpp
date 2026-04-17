@@ -26,8 +26,7 @@ RhythmEngine::~RhythmEngine() {
 }
 
 void RhythmEngine::generateClickBuffer() {
-    // Создаём короткий звук "клик" (синусоида + затухание)
-    const int32_t clickLength = SAMPLE_RATE / 10; // 100 мс
+    const int32_t clickLength = SAMPLE_RATE / 10;
     mClickBuffer.resize(clickLength);
 
     for (int i = 0; i < clickLength; ++i) {
@@ -38,11 +37,65 @@ void RhythmEngine::generateClickBuffer() {
     LOGD("Click buffer generated, size: %d", clickLength);
 }
 
-void RhythmEngine::start() {
-    LOGD("start() called, current playing state: %d", mIsPlaying.load());
+void RhythmEngine::setBpm(int bpm) {
+    if (bpm < 40) bpm = 40;
+    if (bpm > 200) bpm = 200;
+    LOGD("BPM changing from %d to %d", mCurrentBpm.load(), bpm);
+    mCurrentBpm = bpm;
 
     if (mIsPlaying) {
-        LOGD("Already playing");
+        mNeedsRestart = true;
+    }
+}
+
+void RhythmEngine::restartStream() {
+    if (!mIsPlaying) return;
+
+    LOGD("Restarting stream with new BPM=%d", mCurrentBpm.load());
+
+    // Останавливаем текущий поток
+    if (mStream) {
+        mStream->stop();
+        closeStream();
+    }
+
+    // Пересоздаём поток с новыми параметрами
+    mFrameCounter = 0;
+    mClickPosition = 0;
+
+    oboe::AudioStreamBuilder builder;
+    builder.setDirection(oboe::Direction::Output);
+    builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
+    builder.setSharingMode(oboe::SharingMode::Exclusive);
+    builder.setFormat(oboe::AudioFormat::Float);
+    builder.setSampleRate(SAMPLE_RATE);
+    builder.setChannelCount(oboe::ChannelCount::Mono);
+    builder.setDataCallback(this);
+
+    oboe::Result result = builder.openStream(mStream);
+    if (result != oboe::Result::OK) {
+        LOGE("Failed to reopen stream: %s", oboe::convertToText(result));
+        return;
+    }
+
+    result = mStream->start();
+    if (result != oboe::Result::OK) {
+        LOGE("Failed to restart stream: %s", oboe::convertToText(result));
+        return;
+    }
+
+    LOGD("Stream restarted successfully with BPM=%d", mCurrentBpm.load());
+    mNeedsRestart = false;
+}
+
+void RhythmEngine::start(int bpm) {
+    LOGD("start() called, BPM=%d, current playing state: %d", bpm, mIsPlaying.load());
+
+    setBpm(bpm);
+
+    if (mIsPlaying) {
+        LOGD("Already playing, restarting with new BPM");
+        restartStream();
         return;
     }
 
@@ -56,7 +109,6 @@ void RhythmEngine::start() {
     builder.setChannelCount(oboe::ChannelCount::Mono);
     builder.setDataCallback(this);
 
-    LOGD("Opening stream...");
     oboe::Result result = builder.openStream(mStream);
     if (result != oboe::Result::OK) {
         LOGE("Failed to open stream: %s", oboe::convertToText(result));
@@ -64,7 +116,6 @@ void RhythmEngine::start() {
     }
     LOGD("Stream opened successfully");
 
-    LOGD("Starting stream...");
     result = mStream->start();
     if (result != oboe::Result::OK) {
         LOGE("Failed to start stream: %s", oboe::convertToText(result));
@@ -74,13 +125,16 @@ void RhythmEngine::start() {
     mIsPlaying = true;
     mFrameCounter = 0;
     mClickPosition = 0;
-    LOGD("Rhythm started successfully, BPM=%d", BPM);
+    LOGD("Rhythm started successfully, BPM=%d", mCurrentBpm.load());
 }
 
 void RhythmEngine::stop() {
     if (!mIsPlaying) return;
 
+    LOGD("stop() called");
     mIsPlaying = false;
+    mNeedsRestart = false;
+
     if (mStream) {
         mStream->stop();
         closeStream();
@@ -100,19 +154,24 @@ oboe::DataCallbackResult RhythmEngine::onAudioReady(
         void* audioData,
         int32_t numFrames) {
 
+    if (mNeedsRestart) {
+        // Отметим, что нужен рестарт, но не делаем его здесь (нельзя блокировать)
+        // В следующем цикле main поток должен вызвать restartStream()
+        return oboe::DataCallbackResult::Continue;
+    }
+
     float* output = static_cast<float*>(audioData);
+    int32_t beatDurationFrames = getBeatDurationFrames();
 
     for (int i = 0; i < numFrames; ++i) {
-        // Определяем, нужно ли сыграть клик на этой фрейме
-        bool isBeatStart = (mFrameCounter % BEAT_DURATION_FRAMES == 0);
+        bool isBeatStart = (mFrameCounter % beatDurationFrames == 0);
 
         if (isBeatStart && mIsPlaying) {
             mClickPosition = 0;
         }
 
-        // Воспроизводим клик, если мы внутри его длительности
         float sample = 0.0f;
-        if (mClickPosition < (int)mClickBuffer.size()) {
+        if (mClickPosition < (int)mClickBuffer.size() && mIsPlaying) {
             sample = mClickBuffer[mClickPosition];
             mClickPosition++;
         }
@@ -120,8 +179,7 @@ oboe::DataCallbackResult RhythmEngine::onAudioReady(
         output[i] = sample;
         mFrameCounter++;
 
-        // Предотвращаем переполнение счётчика
-        if (mFrameCounter >= BEAT_DURATION_FRAMES * 8) {
+        if (mFrameCounter >= beatDurationFrames * 8) {
             mFrameCounter = 0;
         }
     }
