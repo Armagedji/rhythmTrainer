@@ -51,11 +51,19 @@ class MainActivity : ComponentActivity() {
     private external fun stopRhythm()
     private external fun onTap()
     private external fun isRhythmPlaying(): Boolean
+    private external fun startCalibration(bpm: Int)
+    private external fun stopCalibration()
+    private external fun getCalibrationOffset(): Int
+    private external fun setCalibrationOffset(offsetMs: Int)
 
     // MutableState для UI
     private val _score = mutableStateOf(0)
     private val _lastResult = mutableStateOf("")
     private val _vibrationEnabled = mutableStateOf(true)
+    private val _calibrationOffset = mutableStateOf(getCalibrationOffset())
+    private val _calibrationTapCount = mutableStateOf(0)
+    private val _calibrationAvgDev = mutableStateOf(0)
+    private val _isCalibrating = mutableStateOf(false)
 
     // Callback'и из C++
     @Suppress("unused")
@@ -77,6 +85,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Suppress("unused")
+    fun updateCalibration(tapCount: Int, avgDeviation: Int) {
+        runOnUiThread {
+            Log.d(TAG, "updateCalibration: taps=$tapCount, avgDev=$avgDeviation")
+            _calibrationTapCount.value = tapCount
+            if (avgDeviation != 0) {
+                _calibrationAvgDev.value = avgDeviation
+            }
+        }
+    }
+
     private fun vibrateDevice() {
         val vibratorInstance = vibrator ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -85,6 +104,24 @@ class MainActivity : ComponentActivity() {
             @Suppress("DEPRECATION")
             vibratorInstance.vibrate(50)
         }
+    }
+
+    private fun finishCalibration() {
+        val avgDev = _calibrationAvgDev.value
+        Log.d(TAG, "finishCalibration: avgDev=$avgDev, tapCount=${_calibrationTapCount.value}")
+        if (avgDev != 0 && _calibrationTapCount.value >= 3) {
+            // Сохраняем отрицательное смещение, чтобы компенсировать опоздание
+            val offset = -avgDev
+            setCalibrationOffset(offset)
+            _calibrationOffset.value = offset
+            Log.d(TAG, "Calibration saved: offset=$offset ms")
+        } else {
+            Log.d(TAG, "Calibration not saved - avgDev=$avgDev, taps=${_calibrationTapCount.value}")
+        }
+        _isCalibrating.value = false
+        stopCalibration()
+        _calibrationTapCount.value = 0
+        _calibrationAvgDev.value = 0
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -106,6 +143,10 @@ class MainActivity : ComponentActivity() {
                     score = _score.value,
                     lastResult = _lastResult.value,
                     vibrationEnabled = _vibrationEnabled.value,
+                    calibrationOffset = _calibrationOffset.value,
+                    isCalibrating = _isCalibrating.value,
+                    calibrationTapCount = _calibrationTapCount.value,
+                    calibrationAvgDev = _calibrationAvgDev.value,
                     onStartRhythm = { bpm ->
                         Log.d(TAG, "onStartRhythm lambda called with BPM=$bpm")
                         startRhythm(bpm)
@@ -122,6 +163,28 @@ class MainActivity : ComponentActivity() {
                     },
                     onVibrationChanged = { enabled ->
                         _vibrationEnabled.value = enabled
+                    },
+                    onStartCalibration = {
+                        Log.d(TAG, "onStartCalibration called")
+                        _isCalibrating.value = true
+                        _calibrationTapCount.value = 0
+                        _calibrationAvgDev.value = 0
+                        startCalibration(120)
+                    },
+                    onCalibrationTap = {
+                        Log.d(TAG, "onCalibrationTap called")
+                        onTap()
+                    },
+                    onFinishCalibration = {
+                        Log.d(TAG, "onFinishCalibration called")
+                        finishCalibration()
+                    },
+                    onCancelCalibration = {
+                        Log.d(TAG, "onCancelCalibration called")
+                        _isCalibrating.value = false
+                        stopCalibration()
+                        _calibrationTapCount.value = 0
+                        _calibrationAvgDev.value = 0
                     }
                 )
             }
@@ -135,6 +198,7 @@ sealed class Screen(val title: String) {
     object Settings : Screen("Настройки")
     object LevelSelect : Screen("Выбор уровня")
     data class Game(val levelId: Int, val bpm: Int) : Screen("Тренировка")
+    object Calibration : Screen("Калибровка")
 }
 
 @Composable
@@ -142,10 +206,18 @@ fun NavigationHost(
     score: Int,
     lastResult: String,
     vibrationEnabled: Boolean,
+    calibrationOffset: Int,
+    isCalibrating: Boolean,
+    calibrationTapCount: Int,
+    calibrationAvgDev: Int,
     onStartRhythm: (bpm: Int) -> Unit,
     onStopRhythm: () -> Unit,
     onTap: () -> Unit,
-    onVibrationChanged: (Boolean) -> Unit
+    onVibrationChanged: (Boolean) -> Unit,
+    onStartCalibration: () -> Unit,
+    onCalibrationTap: () -> Unit,
+    onFinishCalibration: () -> Unit,
+    onCancelCalibration: () -> Unit
 ) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.MainMenu) }
     var currentBpm by remember { mutableStateOf(80) }
@@ -167,13 +239,17 @@ fun NavigationHost(
                 )
                 Screen.Settings -> SettingsScreen(
                     vibrationEnabled = vibrationEnabled,
+                    calibrationOffset = calibrationOffset,
                     onVibrationChanged = onVibrationChanged,
+                    onStartCalibration = {
+                        onStartCalibration()
+                        currentScreen = Screen.Calibration
+                    },
                     onBack = { currentScreen = Screen.MainMenu }
                 )
                 Screen.LevelSelect -> LevelSelectScreen(
                     onBack = { currentScreen = Screen.MainMenu },
                     onLevelSelected = { levelId, bpm ->
-                        Log.d("NavigationHost", "Level selected: id=$levelId, BPM=$bpm")
                         currentBpm = bpm
                         currentScreen = Screen.Game(levelId, bpm)
                     }
@@ -186,17 +262,28 @@ fun NavigationHost(
                         score = score,
                         lastResult = lastResult,
                         onBack = {
-                            Log.d("NavigationHost", "GameScreen onBack called")
                             onStopRhythm()
                             currentScreen = Screen.MainMenu
                         },
                         onStartRhythm = {
-                            Log.d("NavigationHost", "GameScreen onStartRhythm called with BPM=${gameScreen.bpm}")
                             onStartRhythm(gameScreen.bpm)
                         },
                         onTap = onTap
                     )
                 }
+                Screen.Calibration -> CalibrationScreen(
+                    tapCount = calibrationTapCount,
+                    avgDeviation = calibrationAvgDev,
+                    onTap = onCalibrationTap,
+                    onFinish = {
+                        onFinishCalibration()
+                        currentScreen = Screen.Settings
+                    },
+                    onCancel = {
+                        onCancelCalibration()
+                        currentScreen = Screen.Settings
+                    }
+                )
             }
         }
     }
@@ -247,11 +334,12 @@ fun LearningScreen(onBack: () -> Unit) {
 @Composable
 fun SettingsScreen(
     vibrationEnabled: Boolean,
+    calibrationOffset: Int,
     onVibrationChanged: (Boolean) -> Unit,
+    onStartCalibration: () -> Unit,
     onBack: () -> Unit
 ) {
     var soundEnabled by remember { mutableStateOf(true) }
-    var calibrationOffset by remember { mutableStateOf(0) }
 
     Column(
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -263,15 +351,72 @@ fun SettingsScreen(
         Button(onClick = { onVibrationChanged(!vibrationEnabled) }) {
             Text("Вибрация: ${if (vibrationEnabled) "Вкл" else "Выкл"}")
         }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Калибровка: $calibrationOffset мс")
-            androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { calibrationOffset -= 10 }) { Text("-10") }
-                Button(onClick = { calibrationOffset += 10 }) { Text("+10") }
-            }
+        Text("Калибровка: $calibrationOffset мс", fontSize = 16.sp)
+        Button(onClick = onStartCalibration) {
+            Text("🎯 Калибровать задержку")
         }
         Button(onClick = onBack) {
             Text("Назад")
+        }
+    }
+}
+
+@Composable
+fun CalibrationScreen(
+    tapCount: Int,
+    avgDeviation: Int,
+    onTap: () -> Unit,
+    onFinish: () -> Unit,
+    onCancel: () -> Unit
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Text(
+            text = "Калибровка задержки\n\n" +
+                    "Слушайте ритм и нажимайте на кнопку\n" +
+                    "в такт метроному.\n\n" +
+                    "Сделайте 8-10 нажатий для точной калибровки.",
+            fontSize = 18.sp
+        )
+
+        Text(
+            text = "Нажатий: $tapCount",
+            fontSize = 20.sp
+        )
+
+        if (avgDeviation != 0 && tapCount >= 5) {
+            Text(
+                text = "Среднее отклонение: $avgDeviation мс",
+                fontSize = 16.sp,
+                color = if (kotlin.math.abs(avgDeviation) < 30)
+                    androidx.compose.ui.graphics.Color.Green
+                else
+                    androidx.compose.ui.graphics.Color.Yellow
+            )
+        }
+
+        Button(
+            onClick = onTap,
+            modifier = Modifier
+                .fillMaxWidth(0.8f)
+                .height(100.dp)
+        ) {
+            Text("👆 Нажми в ритм!", fontSize = 20.sp)
+        }
+
+        Button(
+            onClick = onFinish,
+            modifier = Modifier.fillMaxWidth(0.8f),
+            enabled = tapCount >= 3
+        ) {
+            Text(if (tapCount >= 3) "✅ Завершить калибровку" else "Сделайте хотя бы 3 нажатия")
+        }
+
+        Button(onClick = onCancel) {
+            Text("❌ Отмена")
         }
     }
 }

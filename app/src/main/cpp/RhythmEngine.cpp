@@ -186,10 +186,11 @@ void RhythmEngine::processTap(long long tapTimeMs) {
     long long elapsed = tapTimeMs - mGameStartTime;
     long long beatDurationMs = (60 * 1000) / mCurrentBpm;
 
-    // Находим ближайшую ноту
     long long beatNumber = (elapsed + beatDurationMs / 2) / beatDurationMs;
     long long idealTimeMs = beatNumber * beatDurationMs;
-    int deviationMs = (int)(elapsed - idealTimeMs);
+
+    // Учитываем калибровочное смещение
+    int deviationMs = (int)(elapsed - idealTimeMs) - mCalibrationOffset;
 
     int score = calculateScore(deviationMs);
     const char* resultText = getResultText(deviationMs);
@@ -198,8 +199,8 @@ void RhythmEngine::processTap(long long tapTimeMs) {
         mCurrentScore += score;
     }
 
-    LOGD("Tap: elapsed=%lld, ideal=%lld, dev=%d, result=%s, score=%d, total=%d",
-         elapsed, idealTimeMs, deviationMs, resultText, score, mCurrentScore.load());
+    LOGD("Tap: elapsed=%lld, ideal=%lld, raw_dev=%lld, offset=%d, final_dev=%d, result=%s, score=%d, total=%d",
+         elapsed, idealTimeMs, (elapsed - idealTimeMs), mCalibrationOffset, deviationMs, resultText, score, mCurrentScore.load());
 
     if (mScoreCallback) {
         mScoreCallback(mCurrentScore.load(), resultText);
@@ -209,7 +210,12 @@ void RhythmEngine::processTap(long long tapTimeMs) {
 void RhythmEngine::onTap() {
     long long tapTime = getCurrentTimeMs();
     LOGD("onTap() called at %lld", tapTime);
-    processTap(tapTime);
+
+    if (mCalibrationStartTime != 0 && mIsPlaying) {
+        addCalibrationTap();
+    } else {
+        processTap(tapTime);
+    }
 }
 
 oboe::DataCallbackResult RhythmEngine::onAudioReady(
@@ -246,4 +252,75 @@ oboe::DataCallbackResult RhythmEngine::onAudioReady(
     }
 
     return oboe::DataCallbackResult::Continue;
+}
+
+void RhythmEngine::setCalibrationOffset(int offsetMs) {
+    mCalibrationOffset = offsetMs;
+    LOGD("Calibration offset set to %d ms", offsetMs);
+}
+
+void RhythmEngine::startCalibration(int bpm) {
+    LOGD("startCalibration() called, BPM=%d", bpm);
+    mCalibrationDeviations.clear();
+    mCalibrationTapCount = 0;
+    mCalibrationAverageDeviation = 0;
+    setBpm(bpm);
+
+    if (mIsPlaying) {
+        restartStream();
+    } else {
+        start(bpm);
+    }
+
+    mCalibrationStartTime = getCurrentTimeMs();
+    LOGD("Calibration started at %lld", mCalibrationStartTime);
+}
+
+void RhythmEngine::stopCalibration() {
+    LOGD("stopCalibration() called");
+    stop();
+
+    if (!mCalibrationDeviations.empty()) {
+        int sum = 0;
+        for (int dev : mCalibrationDeviations) {
+            sum += dev;
+        }
+        mCalibrationAverageDeviation = sum / mCalibrationDeviations.size();
+        LOGD("Calibration complete: %d taps, average deviation = %d ms",
+             (int)mCalibrationDeviations.size(), mCalibrationAverageDeviation);
+    } else {
+        mCalibrationAverageDeviation = 0;
+        LOGD("Calibration complete: no taps recorded");
+    }
+
+    if (mCalibrationCallback) {
+        mCalibrationCallback(mCalibrationTapCount, mCalibrationAverageDeviation);
+    }
+
+    mCalibrationStartTime = 0;
+}
+
+void RhythmEngine::addCalibrationTap() {
+    if (!mIsPlaying || mCalibrationStartTime == 0) {
+        LOGD("Calibration tap ignored - not in calibration mode");
+        return;
+    }
+
+    long long currentTime = getCurrentTimeMs();
+    long long elapsed = currentTime - mCalibrationStartTime;
+    long long beatDurationMs = (60 * 1000) / mCurrentBpm;
+
+    long long beatNumber = (elapsed + beatDurationMs / 2) / beatDurationMs;
+    long long idealTimeMs = beatNumber * beatDurationMs;
+    int deviationMs = (int)(elapsed - idealTimeMs);
+
+    mCalibrationDeviations.push_back(deviationMs);
+    mCalibrationTapCount++;
+
+    LOGD("Calibration tap: elapsed=%lld, ideal=%lld, dev=%d, total taps=%d",
+         elapsed, idealTimeMs, deviationMs, mCalibrationTapCount);
+
+    if (mCalibrationCallback) {
+        mCalibrationCallback(mCalibrationTapCount, 0);
+    }
 }

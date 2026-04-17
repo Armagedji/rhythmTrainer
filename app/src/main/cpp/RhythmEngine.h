@@ -25,6 +25,12 @@ public:
     void resetGame();
     void setScoreUpdateCallback(std::function<void(int, const char*)> callback);
 
+    void startCalibration(int bpm = 120);
+    void stopCalibration();
+    int getCalibrationOffset() const { return mCalibrationOffset; }
+    void setCalibrationOffset(int offsetMs);
+    void setCalibrationCallback(std::function<void(int, int)> callback) { mCalibrationCallback = callback; }
+
     // AudioStreamDataCallback interface
     oboe::DataCallbackResult onAudioReady(
             oboe::AudioStream* oboeStream,
@@ -40,6 +46,14 @@ private:
     void generateClickBuffer();
     void closeStream();
     void restartStream();
+
+    std::vector<int> mCalibrationDeviations;
+    int mCalibrationAverageDeviation = 0;
+    int mCalibrationOffset = 0;
+    long long mCalibrationStartTime = 0;
+    int mCalibrationTapCount = 0;
+    std::function<void(int, int)> mCalibrationCallback;
+    void addCalibrationTap();
 
 
     std::shared_ptr<oboe::AudioStream> mStream;
