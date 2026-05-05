@@ -91,7 +91,17 @@ class MainActivity : ComponentActivity() {
             Log.d(TAG, "updateCalibration: taps=$tapCount, avgDev=$avgDeviation")
             _calibrationTapCount.value = tapCount
             if (avgDeviation != 0) {
+                // Это финальное значение после stopCalibration()
                 _calibrationAvgDev.value = avgDeviation
+                val offset = -avgDeviation
+                setCalibrationOffset(offset)
+                _calibrationOffset.value = offset
+                Log.d(TAG, "Calibration saved: offset=$offset ms")
+
+                // Закрываем экран калибровки
+                _isCalibrating.value = false
+                _calibrationTapCount.value = 0
+                _calibrationAvgDev.value = 0
             }
         }
     }
@@ -107,21 +117,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun finishCalibration() {
-        val avgDev = _calibrationAvgDev.value
-        Log.d(TAG, "finishCalibration: avgDev=$avgDev, tapCount=${_calibrationTapCount.value}")
-        if (avgDev != 0 && _calibrationTapCount.value >= 3) {
-            // Сохраняем отрицательное смещение, чтобы компенсировать опоздание
-            val offset = -avgDev
-            setCalibrationOffset(offset)
-            _calibrationOffset.value = offset
-            Log.d(TAG, "Calibration saved: offset=$offset ms")
-        } else {
-            Log.d(TAG, "Calibration not saved - avgDev=$avgDev, taps=${_calibrationTapCount.value}")
-        }
-        _isCalibrating.value = false
+        Log.d(TAG, "finishCalibration called")
+        // Просто останавливаем калибровку - C++ сам вызовет callback с результатом
         stopCalibration()
-        _calibrationTapCount.value = 0
-        _calibrationAvgDev.value = 0
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

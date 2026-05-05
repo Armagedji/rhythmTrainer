@@ -165,15 +165,15 @@ long long RhythmEngine::getCurrentTimeMs() const {
 
 const char* RhythmEngine::getResultText(int deviationMs) {
     int absDev = std::abs(deviationMs);
-    if (absDev <= 30) return "Perfect!";
-    if (absDev <= 70) return "Good!";
+    if (absDev <= 60) return "Perfect!";
+    if (absDev <= 120) return "Good!";
     return "Miss...";
 }
 
 int RhythmEngine::calculateScore(int deviationMs) {
     int absDev = std::abs(deviationMs);
-    if (absDev <= 30) return 10;
-    if (absDev <= 70) return 5;
+    if (absDev <= 60) return 10;
+    if (absDev <= 120) return 5;
     return 0;
 }
 
@@ -183,6 +183,13 @@ void RhythmEngine::processTap(long long tapTimeMs) {
         return;
     }
 
+    // Если это первое нажатие после старта
+    if (mGameStartTime == 0) {
+        mGameStartTime = tapTimeMs;
+        LOGD("First tap, setting gameStartTime to %lld", tapTimeMs);
+        return; // Не оцениваем первое нажатие
+    }
+
     long long elapsed = tapTimeMs - mGameStartTime;
     long long beatDurationMs = (60 * 1000) / mCurrentBpm;
 
@@ -190,8 +197,8 @@ void RhythmEngine::processTap(long long tapTimeMs) {
     long long idealTimeMs = beatNumber * beatDurationMs;
 
     // Учитываем калибровочное смещение
-    int deviationMs = (int)(elapsed - idealTimeMs) - mCalibrationOffset;
-
+    int deviationMs = (int)(elapsed - idealTimeMs) + mCalibrationOffset;
+    LOGD("Tap: offset=%d, final_dev=%d", mCalibrationOffset, deviationMs);
     int score = calculateScore(deviationMs);
     const char* resultText = getResultText(deviationMs);
 
