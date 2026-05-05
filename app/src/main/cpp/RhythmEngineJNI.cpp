@@ -10,6 +10,7 @@ static jobject g_javaObject = nullptr;
 static jmethodID g_updateScoreMethod = nullptr;
 static jmethodID g_updateResultMethod = nullptr;
 static jmethodID g_updateCalibrationMethod = nullptr;
+static jmethodID g_updateAllNotesProgressMethod = nullptr;
 
 extern "C" {
 
@@ -179,5 +180,26 @@ Java_com_example_rhythmtrainer_MainActivity_setNotePositionCallback(JNIEnv* env,
         if (needDetach) vm->DetachCurrentThread();
     });
 }
+
+JNIEXPORT void JNICALL
+Java_com_example_rhythmtrainer_MainActivity_setAllNotesProgressCallback(JNIEnv* env, jobject /* this */) {
+    RhythmEngine::getInstance()->setAllNotesProgressCallback([=](const std::vector<float>& progresses) {
+        JNIEnv* env = nullptr;
+        JavaVM* vm = RhythmEngine::getInstance()->getJavaVM();
+        if (vm == nullptr) return;
+        int attached = vm->GetEnv((void**)&env, JNI_VERSION_1_6);
+        bool needDetach = (attached == JNI_EDETACHED);
+        if (needDetach) vm->AttachCurrentThread(&env, nullptr);
+        jfloatArray array = env->NewFloatArray(progresses.size());
+        env->SetFloatArrayRegion(array, 0, progresses.size(), progresses.data());
+        jclass clazz = env->GetObjectClass(g_javaObject);
+        jmethodID method = env->GetMethodID(clazz, "updateAllNotesProgress", "([F)V");
+        env->CallVoidMethod(g_javaObject, method, array);
+        env->DeleteLocalRef(array);
+        if (needDetach) vm->DetachCurrentThread();
+    });
+}
+
+
 
 } // extern "C"

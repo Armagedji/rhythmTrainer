@@ -33,6 +33,8 @@ public:
     void setCalibrationOffset(int offsetMs);
     void setCalibrationCallback(std::function<void(int, int)> callback);
 
+    void setAllNotesProgressCallback(std::function<void(const std::vector<float>&)> callback);
+
     // JVM для callback'ов
     void setJavaVM(JavaVM* vm) { mJavaVM = vm; }
     JavaVM* getJavaVM() const { return mJavaVM; }
@@ -70,6 +72,9 @@ private:
     std::atomic<long long> mGameStartTime{0};
     std::function<void(int, const char*)> mScoreCallback;
     std::function<void(int, float)> mNotePositionCallback;
+
+    std::function<void(const std::vector<float>&)> mAllNotesProgressCallback;
+    std::vector<float> mAllProgresses;
 
     // Таймлайн
     std::vector<long long> mTimeline;  // идеальные моменты нажатий в мс от начала

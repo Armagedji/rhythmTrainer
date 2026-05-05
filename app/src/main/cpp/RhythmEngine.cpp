@@ -265,8 +265,11 @@ oboe::DataCallbackResult RhythmEngine::onAudioReady(
         }
     }
 
-    long long elapsed = getCurrentTimeMs() - mGameStartTime;
-    updateNotePosition(elapsed);
+    long long currentTime = getCurrentTimeMs();
+    if (mIsPlaying && mGameStartTime != 0) {
+        long long elapsed = currentTime - mGameStartTime;
+        updateNotePosition(elapsed); // <-- этот вызов
+    }
     return oboe::DataCallbackResult::Continue;
 }
 
@@ -353,28 +356,6 @@ void RhythmEngine::loadSong(int bpm, int totalNotes) {
     LOGD("Song loaded: %d notes at %d BPM", totalNotes, bpm);
 }
 
-void RhythmEngine::updateNotePosition(long long elapsedMs) {
-    if (!mIsPlaying) return;
-
-    int noteIndex = -1;
-    // Ищем ближайшую ноту, которая будет в пределах видимости (за 2000 мс до идеального момента)
-    for (int i = 0; i < (int)mTimeline.size(); ++i) {
-        long long timeToNote = mTimeline[i] - elapsedMs;
-        if (timeToNote > -500 && timeToNote < 2000) {
-            noteIndex = i;
-            break;
-        }
-    }
-
-    if (noteIndex != -1 && mNotePositionCallback) {
-        long long timeToNote = mTimeline[noteIndex] - elapsedMs;
-        // progress от 0 (только появилась) до 1 (достигла цели)
-        float progress = 1.0f - (timeToNote + 500) / 2500.0f;
-        progress = std::max(0.0f, std::min(1.0f, progress));
-        mNotePositionCallback(noteIndex, progress);
-    }
-}
-
 void RhythmEngine::setNotePositionCallback(std::function<void(int, float)> callback) {
     mNotePositionCallback = callback;
     LOGD("Note position callback set");
@@ -383,5 +364,30 @@ void RhythmEngine::setNotePositionCallback(std::function<void(int, float)> callb
 void RhythmEngine::setCalibrationCallback(std::function<void(int, int)> callback) {
     mCalibrationCallback = callback;
     LOGD("Calibration callback set");
+}
+
+void RhythmEngine::setAllNotesProgressCallback(std::function<void(const std::vector<float>&)> callback) {
+    mAllNotesProgressCallback = callback;
+    LOGD("All notes progress callback set");
+}
+
+void RhythmEngine::updateNotePosition(long long elapsedMs) {
+    if (!mIsPlaying) return;
+    const long long LEAD_TIME_MS = 2000;
+    const long long TAIL_TIME_MS = 500;
+    mAllProgresses.resize(mTotalNotes);
+    for (int i = 0; i < mTotalNotes; ++i) {
+        long long timeToHit = mTimeline[i] - elapsedMs;
+        if (timeToHit > -TAIL_TIME_MS && timeToHit < LEAD_TIME_MS) {
+            float progress = 1.0f - (float)(timeToHit + TAIL_TIME_MS) / (LEAD_TIME_MS + TAIL_TIME_MS);
+            progress = std::max(0.0f, std::min(1.0f, progress));
+            mAllProgresses[i] = progress;
+        } else {
+            mAllProgresses[i] = -1.0f;
+        }
+    }
+    if (mAllNotesProgressCallback) {
+        mAllNotesProgressCallback(mAllProgresses);
+    }
 }
 

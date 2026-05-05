@@ -68,6 +68,8 @@ class MainActivity : ComponentActivity() {
     private external fun loadSong(bpm: Int, totalNotes: Int)
     private external fun getTotalNotes(): Int
     private external fun setNotePositionCallback()
+    private external fun setAllNotesProgressCallback()
+
 
     // MutableState для UI
     private val _score = mutableStateOf(0)
@@ -78,6 +80,7 @@ class MainActivity : ComponentActivity() {
     private val _calibrationAvgDev = mutableStateOf(0)
     private val _isCalibrating = mutableStateOf(false)
     private val _notePositions = mutableStateOf<Map<Int, Float>>(emptyMap())
+    private val _allNotesProgress = mutableStateOf(floatArrayOf())
 
     // Callback'и из C++
     @Suppress("unused")
@@ -85,6 +88,14 @@ class MainActivity : ComponentActivity() {
         runOnUiThread {
             Log.d(TAG, "updateScore: $score")
             _score.value = score
+        }
+    }
+
+    @Suppress("unused")
+    fun updateAllNotesProgress(progress: FloatArray) {
+        Log.d(TAG, "updateAllNotesProgress: size=${progress.size}, first=${progress.firstOrNull()}")
+        runOnUiThread {
+            _allNotesProgress.value = progress
         }
     }
 
@@ -157,6 +168,7 @@ class MainActivity : ComponentActivity() {
         }
 
         nativeInit()
+        setAllNotesProgressCallback()
 
         setContent {
             RhythmTrainerTheme {
@@ -208,8 +220,8 @@ class MainActivity : ComponentActivity() {
                         _calibrationAvgDev.value = 0
                     },
                     onGetTotalNotes = { getTotalNotes() },
-                    notePositions = _notePositions.value,
-                    onSetNotePositionCallback = { setNotePositionCallback() }
+                    allProgresses = _allNotesProgress.value,
+                    onSetAllNotesProgressCallback = { setAllNotesProgressCallback() }
                 )
             }
         }
@@ -244,8 +256,8 @@ fun NavigationHost(
     onFinishCalibration: () -> Unit,
     onCancelCalibration: () -> Unit,
     onGetTotalNotes: () -> Int,
-    notePositions: Map<Int, Float>,
-    onSetNotePositionCallback: () -> Unit,
+    allProgresses: FloatArray,
+    onSetAllNotesProgressCallback: () -> Unit
 ) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.MainMenu) }
     var currentLevelId by remember { mutableStateOf(1) }
@@ -311,8 +323,8 @@ fun NavigationHost(
                         },
                         onStartRhythm = { onStartRhythm(currentBpm) },
                         onTap = onTap,
-                        notePositions = notePositions,
-                        onSetNotePositionCallback = onSetNotePositionCallback
+                        allProgresses = allProgresses,
+                        onSetCallback = onSetAllNotesProgressCallback
                     )
                 }
             }
@@ -554,47 +566,49 @@ fun GameScreenWithNotes(
     onBack: () -> Unit,
     onStartRhythm: () -> Unit,
     onTap: () -> Unit,
-    notePositions: Map<Int, Float>,
-    onSetNotePositionCallback: () -> Unit
+    allProgresses: FloatArray,
+    onSetCallback: () -> Unit
 ) {
     LaunchedEffect(Unit) {
-        onSetNotePositionCallback()
+        onSetCallback()
+    }
+    LaunchedEffect(allProgresses) {
+        Log.d("GameScreen", "allProgresses size=${allProgresses.size}, totalNotes=$totalNotes")
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Canvas для отрисовки нот
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val noteWidth = 40f
-            val startX = 3000f // правая сторона
-            val endX = 600f                        // левая сторона (линия попадания)
+            val screenWidth = size.width
+            val screenHeight = size.height
+            val hitLineX = screenWidth / 2f  // линия попадания по центру
+            val startX = screenWidth + 100f  // за правым краем
+            val endX = -100f                 // за левым краем
 
             for (i in 0 until totalNotes) {
-                val progress = notePositions[i] ?: -1f
+                val progress = if (i < allProgresses.size) allProgresses[i] else -1f
                 if (progress in 0f..1f) {
-                    val x = startX - (startX - endX) * progress
-                    val y = size.height / 2 + (if (i % 2 == 0) -30f else 30f)
+                    val x = startX - (startX - hitLineX) * progress
+                    val y = screenHeight / 2 + (if (i % 2 == 0) -40f else 40f)
 
-                    // Рисуем ноту (круг)
                     drawCircle(
-                        color = if (progress > 0.9f) Color.Red else Color.White,
-                        radius = 40f,
+                        color = if (progress > 0.95f) Color.Red else Color.White,
+                        radius = 25f,
                         center = Offset(x, y)
                     )
-                    // Рисуем стебель
                     drawLine(
                         color = Color.White,
                         start = Offset(x, y),
-                        end = Offset(x, y - 60f),
-                        strokeWidth = 3f
+                        end = Offset(x, y - 50f),
+                        strokeWidth = 4f
                     )
                 }
             }
 
-            // Линия попадания
+            // Линия попадания (зелёная вертикальная)
             drawLine(
                 color = Color.Green,
-                start = Offset(endX, 0f),
-                end = Offset(endX, size.height),
+                start = Offset(hitLineX, 0f),
+                end = Offset(hitLineX, screenHeight),
                 strokeWidth = 5f
             )
         }
