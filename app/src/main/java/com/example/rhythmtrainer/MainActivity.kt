@@ -9,7 +9,6 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,12 +18,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,7 +35,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.lifecycleScope
 import com.example.rhythmtrainer.ui.theme.RhythmTrainerTheme
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -79,6 +82,19 @@ class MainActivity : ComponentActivity() {
     private val _isCalibrating = mutableStateOf(false)
     private val _notePositions = mutableStateOf<Map<Int, Float>>(emptyMap())
 
+    // Состояния навигации и уровня (подняты в MainActivity)
+    private var currentScreen by mutableStateOf<Screen>(Screen.MainMenu)
+    private var currentLevelId by mutableStateOf(1)
+    private var currentBpm by mutableStateOf(80)
+
+    // Состояния для диалога результатов
+    private var showResultDialog by mutableStateOf(false)
+    private var dialogScore by mutableStateOf(0)
+    private var dialogHasNextLevel by mutableStateOf(false)
+
+    // Таймер для завершения уровня
+    private var levelCompletionJob: Job? = null
+
     // Callback'и из C++
     @Suppress("unused")
     fun updateScore(score: Int) {
@@ -114,14 +130,11 @@ class MainActivity : ComponentActivity() {
             Log.d(TAG, "updateCalibration: taps=$tapCount, avgDev=$avgDeviation")
             _calibrationTapCount.value = tapCount
             if (avgDeviation != 0) {
-                // Это финальное значение после stopCalibration()
                 _calibrationAvgDev.value = avgDeviation
                 val offset = -avgDeviation
                 setCalibrationOffset(offset)
                 _calibrationOffset.value = offset
                 Log.d(TAG, "Calibration saved: offset=$offset ms")
-
-                // Закрываем экран калибровки
                 _isCalibrating.value = false
                 _calibrationTapCount.value = 0
                 _calibrationAvgDev.value = 0
@@ -139,9 +152,32 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun startLevel(bpm: Int, notesCount: Int = 32) {
+        levelCompletionJob?.cancel()
+        _score.value = 0
+        _lastResult.value = ""
+        startRhythm(bpm)
+        val beatDurationMs = 60000L / bpm
+        val durationMs = (notesCount - 1) * beatDurationMs
+        levelCompletionJob = lifecycleScope.launch {
+            delay(durationMs + 300)
+            if (isRhythmPlaying()) {
+                stopRhythm()
+                dialogScore = _score.value
+                // Проверка, есть ли следующий уровень (всего 3 уровня)
+                dialogHasNextLevel = (currentLevelId < 3)
+                showResultDialog = true
+            }
+        }
+    }
+
+    private fun stopLevel() {
+        levelCompletionJob?.cancel()
+        if (isRhythmPlaying()) stopRhythm()
+    }
+
     private fun finishCalibration() {
         Log.d(TAG, "finishCalibration called")
-        // Просто останавливаем калибровку - C++ сам вызовет callback с результатом
         stopCalibration()
     }
 
@@ -160,57 +196,78 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             RhythmTrainerTheme {
-                NavigationHost(
-                    score = _score.value,
-                    lastResult = _lastResult.value,
-                    vibrationEnabled = _vibrationEnabled.value,
-                    calibrationOffset = _calibrationOffset.value,
-                    isCalibrating = _isCalibrating.value,
-                    calibrationTapCount = _calibrationTapCount.value,
-                    calibrationAvgDev = _calibrationAvgDev.value,
-                    onStartRhythm = { bpm ->
-                        Log.d(TAG, "onStartRhythm lambda called with BPM=$bpm")
-                        startRhythm(bpm)
-                    },
-                    onStopRhythm = {
-                        Log.d(TAG, "onStopRhythm lambda called")
-                        stopRhythm()
-                        _score.value = 0
-                        _lastResult.value = ""
-                    },
-                    onTap = {
-                        Log.d(TAG, "onTap called")
-                        onTap()
-                    },
-                    onVibrationChanged = { enabled ->
-                        _vibrationEnabled.value = enabled
-                    },
-                    onStartCalibration = {
-                        Log.d(TAG, "onStartCalibration called")
-                        _isCalibrating.value = true
-                        _calibrationTapCount.value = 0
-                        _calibrationAvgDev.value = 0
-                        startCalibration(120)
-                    },
-                    onCalibrationTap = {
-                        Log.d(TAG, "onCalibrationTap called")
-                        onTap()
-                    },
-                    onFinishCalibration = {
-                        Log.d(TAG, "onFinishCalibration called")
-                        finishCalibration()
-                    },
-                    onCancelCalibration = {
-                        Log.d(TAG, "onCancelCalibration called")
-                        _isCalibrating.value = false
-                        stopCalibration()
-                        _calibrationTapCount.value = 0
-                        _calibrationAvgDev.value = 0
-                    },
-                    onGetTotalNotes = { getTotalNotes() },
-                    notePositions = _notePositions.value,
-                    onSetNotePositionCallback = { setNotePositionCallback() }
-                )
+                Box {
+                    // Основная навигация
+                    NavigationHost(
+                        currentScreen = currentScreen,
+                        score = _score.value,
+                        lastResult = _lastResult.value,
+                        vibrationEnabled = _vibrationEnabled.value,
+                        calibrationOffset = _calibrationOffset.value,
+                        isCalibrating = _isCalibrating.value,
+                        calibrationTapCount = _calibrationTapCount.value,
+                        calibrationAvgDev = _calibrationAvgDev.value,
+                        currentLevelId = currentLevelId,
+                        currentBpm = currentBpm,
+                        onNavigate = { screen -> currentScreen = screen },
+                        onLevelSelected = { levelId, bpm ->
+                            currentLevelId = levelId
+                            currentBpm = bpm
+                            currentScreen = Screen.GameWithNotes
+                        },
+                        onStartLevel = { bpm -> startLevel(bpm) },
+                        onStopRhythm = { stopRhythm() },
+                        onTap = { onTap() },
+                        onVibrationChanged = { enabled -> _vibrationEnabled.value = enabled },
+                        onStartCalibration = {
+                            _isCalibrating.value = true
+                            _calibrationTapCount.value = 0
+                            _calibrationAvgDev.value = 0
+                            startCalibration(120)
+                            currentScreen = Screen.Calibration
+                        },
+                        onCalibrationTap = { onTap() },
+                        onFinishCalibration = { finishCalibration() },
+                        onCancelCalibration = {
+                            _isCalibrating.value = false
+                            stopCalibration()
+                            _calibrationTapCount.value = 0
+                            _calibrationAvgDev.value = 0
+                            currentScreen = Screen.Settings
+                        },
+                        onGetTotalNotes = { getTotalNotes() },
+                        notePositions = _notePositions.value,
+                        onSetNotePositionCallback = { setNotePositionCallback() }
+                    )
+
+                    // Диалог результатов
+                    if (showResultDialog) {
+                        ResultDialog(
+                            score = dialogScore,
+                            hasNextLevel = dialogHasNextLevel,
+                            onRepeat = {
+                                showResultDialog = false
+                                startLevel(currentBpm)
+                            },
+                            onNext = {
+                                showResultDialog = false
+                                currentLevelId++
+                                currentBpm = when (currentLevelId) {
+                                    1 -> 80
+                                    2 -> 100
+                                    3 -> 120
+                                    else -> 120
+                                }
+                                startLevel(currentBpm)
+                            },
+                            onSelectLevel = {
+                                showResultDialog = false
+                                currentScreen = Screen.LevelSelect
+                            },
+                            onDismiss = { showResultDialog = false }
+                        )
+                    }
+                }
             }
         }
     }
@@ -221,13 +278,13 @@ sealed class Screen(val title: String) {
     object Learning : Screen("Обучение")
     object Settings : Screen("Настройки")
     object LevelSelect : Screen("Выбор уровня")
-//    data class Game(val levelId: Int, val bpm: Int) : Screen("Тренировка")
     object Calibration : Screen("Калибровка")
     object GameWithNotes : Screen("Тренировка")
 }
 
 @Composable
 fun NavigationHost(
+    currentScreen: Screen,
     score: Int,
     lastResult: String,
     vibrationEnabled: Boolean,
@@ -235,7 +292,11 @@ fun NavigationHost(
     isCalibrating: Boolean,
     calibrationTapCount: Int,
     calibrationAvgDev: Int,
-    onStartRhythm: (bpm: Int) -> Unit,
+    currentLevelId: Int,
+    currentBpm: Int,
+    onNavigate: (Screen) -> Unit,
+    onLevelSelected: (Int, Int) -> Unit,
+    onStartLevel: (bpm: Int) -> Unit,
     onStopRhythm: () -> Unit,
     onTap: () -> Unit,
     onVibrationChanged: (Boolean) -> Unit,
@@ -247,58 +308,37 @@ fun NavigationHost(
     notePositions: Map<Int, Float>,
     onSetNotePositionCallback: () -> Unit,
 ) {
-    var currentScreen by remember { mutableStateOf<Screen>(Screen.MainMenu) }
-    var currentLevelId by remember { mutableStateOf(1) }
-    var currentBpm by remember { mutableStateOf(80) }
-
     Scaffold { paddingValues ->
         Column(
-            modifier = Modifier
+            modifier = androidx.compose.ui.Modifier
                 .fillMaxSize()
                 .padding(paddingValues),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
             when (currentScreen) {
-                Screen.MainMenu -> MainMenuScreen(
-                    onNavigate = { currentScreen = it }
-                )
-                Screen.Learning -> LearningScreen(
-                    onBack = { currentScreen = Screen.MainMenu }
-                )
+                Screen.MainMenu -> MainMenuScreen(onNavigate = onNavigate)
+                Screen.Learning -> LearningScreen(onBack = { onNavigate(Screen.MainMenu) })
                 Screen.Settings -> SettingsScreen(
                     vibrationEnabled = vibrationEnabled,
                     calibrationOffset = calibrationOffset,
                     onVibrationChanged = onVibrationChanged,
-                    onStartCalibration = {
-                        onStartCalibration()
-                        currentScreen = Screen.Calibration
-                    },
-                    onBack = { currentScreen = Screen.MainMenu }
+                    onStartCalibration = onStartCalibration,
+                    onBack = { onNavigate(Screen.MainMenu) }
                 )
                 Screen.LevelSelect -> LevelSelectScreen(
-                    onBack = { currentScreen = Screen.MainMenu },
-                    onLevelSelected = { levelId, bpm ->
-                        currentLevelId = levelId
-                        currentBpm = bpm
-                        currentScreen = Screen.GameWithNotes
-                    }
+                    onBack = { onNavigate(Screen.MainMenu) },
+                    onLevelSelected = onLevelSelected
                 )
                 Screen.Calibration -> CalibrationScreen(
                     tapCount = calibrationTapCount,
                     avgDeviation = calibrationAvgDev,
                     onTap = onCalibrationTap,
-                    onFinish = {
-                        onFinishCalibration()
-                        currentScreen = Screen.Settings
-                    },
-                    onCancel = {
-                        onCancelCalibration()
-                        currentScreen = Screen.Settings
-                    }
+                    onFinish = onFinishCalibration,
+                    onCancel = onCancelCalibration
                 )
                 Screen.GameWithNotes -> {
-                    val totalNotes = onGetTotalNotes() // нативная функция
+                    val totalNotes = onGetTotalNotes()
                     GameScreenWithNotes(
                         levelId = currentLevelId,
                         bpm = currentBpm,
@@ -307,9 +347,9 @@ fun NavigationHost(
                         totalNotes = totalNotes,
                         onBack = {
                             onStopRhythm()
-                            currentScreen = Screen.MainMenu
+                            onNavigate(Screen.MainMenu)
                         },
-                        onStartRhythm = { onStartRhythm(currentBpm) },
+                        onStartLevel = { onStartLevel(currentBpm) },
                         onTap = onTap,
                         notePositions = notePositions,
                         onSetNotePositionCallback = onSetNotePositionCallback
@@ -483,68 +523,6 @@ fun LevelSelectScreen(onBack: () -> Unit, onLevelSelected: (levelId: Int, bpm: I
 }
 
 @Composable
-fun GameScreen(
-    levelId: Int,
-    bpm: Int,
-    score: Int,
-    lastResult: String,
-    onBack: () -> Unit,
-    onStartRhythm: () -> Unit,
-    onTap: () -> Unit
-) {
-    var isPlaying by remember { mutableStateOf(false) }
-
-    Column(
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.fillMaxSize()
-    ) {
-        Text(
-            text = "Уровень $levelId\nBPM: $bpm\n\n" +
-                    "Счёт: $score\n\n" +
-                    "Результат: $lastResult\n\n" +
-                    "Статус: ${if (isPlaying) "🎵 Ритм играет" else "⏸ Ритм остановлен"}",
-            fontSize = 20.sp
-        )
-
-        Button(
-            onClick = {
-                Log.d("GameScreen", "Main tap button clicked")
-                if (isPlaying) {
-                    onTap()
-                }
-            },
-            modifier = Modifier
-                .fillMaxWidth(0.8f)
-                .height(120.dp)
-        ) {
-            Text("👆 Нажми в ритм!", fontSize = 24.sp)
-        }
-
-        Button(
-            onClick = {
-                Log.d("GameScreen", "Start/Stop button clicked, isPlaying=$isPlaying")
-                if (!isPlaying) {
-                    onStartRhythm()
-                    isPlaying = true
-                }
-            },
-            modifier = Modifier.fillMaxWidth(0.8f)
-        ) {
-            Text(if (isPlaying) "🔊 Ритм играет" else "▶ Запустить ритм", fontSize = 18.sp)
-        }
-
-        Button(onClick = {
-            Log.d("GameScreen", "Exit button clicked")
-            isPlaying = false
-            onBack()
-        }) {
-            Text("🚪 Выйти")
-        }
-    }
-}
-
-@Composable
 fun GameScreenWithNotes(
     levelId: Int,
     bpm: Int,
@@ -552,7 +530,7 @@ fun GameScreenWithNotes(
     lastResult: String,
     totalNotes: Int,
     onBack: () -> Unit,
-    onStartRhythm: () -> Unit,
+    onStartLevel: () -> Unit,
     onTap: () -> Unit,
     notePositions: Map<Int, Float>,
     onSetNotePositionCallback: () -> Unit
@@ -628,7 +606,7 @@ fun GameScreenWithNotes(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Button(
-                    onClick = onStartRhythm,
+                    onClick = onStartLevel,
                     modifier = Modifier.fillMaxWidth().height(80.dp)
                 ) {
                     Text("Запустить ритм", fontSize = 20.sp)
@@ -649,5 +627,49 @@ fun GameScreenWithNotes(
         }
     }
 }
+
+@Composable
+fun ResultDialog(
+    score: Int,
+    hasNextLevel: Boolean,
+    onRepeat: () -> Unit,
+    onNext: () -> Unit,
+    onSelectLevel: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Уровень пройден!") },
+        text = { Text("Ваш счёт: $score") },
+        confirmButton = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Button(
+                    onClick = onRepeat,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Повторить")
+                }
+                if (hasNextLevel) {
+                    Button(
+                        onClick = onNext,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Следующий уровень")
+                    }
+                }
+                Button(
+                    onClick = onSelectLevel,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Выбор уровня")
+                }
+            }
+        }
+    )
+}
+
 
 data class LevelInfo(val id: Int, val name: String, val description: String, val bpm: Int)
