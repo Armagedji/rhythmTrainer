@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -36,8 +37,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.lifecycleScope
 import com.example.rhythmtrainer.ui.theme.RhythmTrainerTheme
 import kotlinx.coroutines.launch
@@ -92,6 +95,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var progressRepository: ProgressRepository
     private var currentLevelId by mutableStateOf(1)
     private var currentBpm by mutableStateOf(80)
+    private var showResultDialog by mutableStateOf(false)
+    private var completedLevelScore by mutableStateOf(0)
+    private var hasNextLevel by mutableStateOf(false)
 
 
     // Callback'и из C++
@@ -134,13 +140,13 @@ class MainActivity : ComponentActivity() {
     @Suppress("unused")
     fun onLevelComplete(finalScore: Int) {
         runOnUiThread {
-            Log.d(TAG, "Level completed with score: $finalScore")
-            // Здесь сохраните прогресс через репозиторий и покажите диалог результатов
+            // Сохраняем прогресс
             lifecycleScope.launch {
                 progressRepository.saveCompletedLevel("level_$currentLevelId")
                 progressRepository.addToTotalScore(finalScore)
             }
-            showResultDialog(finalScore)
+            // Показываем диалог
+            showResult(finalScore)
         }
     }
 
@@ -175,6 +181,12 @@ class MainActivity : ComponentActivity() {
             @Suppress("DEPRECATION")
             vibratorInstance.vibrate(50)
         }
+    }
+
+    private fun showResult(score: Int) {
+        completedLevelScore = score
+        hasNextLevel = (currentLevelId < 3) // определите totalLevels (например, 3)
+        showResultDialog = true
     }
 
     private fun showResultDialog(score: Int) {
@@ -227,64 +239,103 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             RhythmTrainerTheme {
-                NavigationHost(
-                    score = _score.value,
-                    lastResult = _lastResult.value,
-                    vibrationEnabled = _vibrationEnabled.value,
-                    calibrationOffset = _calibrationOffset.value,
-                    isCalibrating = _isCalibrating.value,
-                    calibrationTapCount = _calibrationTapCount.value,
-                    calibrationAvgDev = _calibrationAvgDev.value,
-                    onStartRhythm = { bpm ->
-                        Log.d(TAG, "onStartRhythm lambda called with BPM=$bpm")
-                        startRhythm(bpm)
-                    },
-                    onStopRhythm = {
-                        Log.d(TAG, "onStopRhythm lambda called")
-                        stopRhythm()
-                        _score.value = 0
-                        _lastResult.value = ""
-                    },
-                    onTap = {
-                        Log.d(TAG, "onTap called")
-                        onTap()
-                    },
-                    onVibrationChanged = { enabled ->
-                        _vibrationEnabled.value = enabled
-                    },
-                    onStartCalibration = {
-                        Log.d(TAG, "onStartCalibration called")
-                        _isCalibrating.value = true
-                        _calibrationTapCount.value = 0
-                        _calibrationAvgDev.value = 0
-                        startCalibration(120)
-                    },
-                    onCalibrationTap = {
-                        Log.d(TAG, "onCalibrationTap called")
-                        onTap()
-                    },
-                    onFinishCalibration = {
-                        Log.d(TAG, "onFinishCalibration called")
-                        finishCalibration()
-                    },
-                    onCancelCalibration = {
-                        Log.d(TAG, "onCancelCalibration called")
-                        _isCalibrating.value = false
-                        stopCalibration()
-                        _calibrationTapCount.value = 0
-                        _calibrationAvgDev.value = 0
-                    },
-                    onGetTotalNotes = { getTotalNotes() },
-                    allProgresses = _allNotesProgress.value,
-                    onSetAllNotesProgressCallback = { setAllNotesProgressCallback() },
-                    currentLevelId = currentLevelId,
-                    currentBpm = currentBpm,
-                    onPauseGame = { pauseGame() },
-                    onResumeGame = { resumeGame() },
-                    onResetGameState = { resetGameState() },
-                    onShowResultDialog = { score -> showResultDialog(score) },
-                    onLevelCompleteCallback = { finalScore -> onLevelComplete(finalScore) }
-                )
+                Box {
+                    // Основной экран навигации
+                    NavigationHost(
+                        score = _score.value,
+                        lastResult = _lastResult.value,
+                        vibrationEnabled = _vibrationEnabled.value,
+                        calibrationOffset = _calibrationOffset.value,
+                        isCalibrating = _isCalibrating.value,
+                        calibrationTapCount = _calibrationTapCount.value,
+                        calibrationAvgDev = _calibrationAvgDev.value,
+                        onStartRhythm = { bpm ->
+                            Log.d(TAG, "onStartRhythm lambda called with BPM=$bpm")
+                            startRhythm(bpm)
+                        },
+                        onStopRhythm = {
+                            Log.d(TAG, "onStopRhythm lambda called")
+                            stopRhythm()
+                            _score.value = 0
+                            _lastResult.value = ""
+                        },
+                        onTap = {
+                            Log.d(TAG, "onTap called")
+                            onTap()
+                        },
+                        onVibrationChanged = { enabled ->
+                            _vibrationEnabled.value = enabled
+                        },
+                        onStartCalibration = {
+                            Log.d(TAG, "onStartCalibration called")
+                            _isCalibrating.value = true
+                            _calibrationTapCount.value = 0
+                            _calibrationAvgDev.value = 0
+                            startCalibration(120)
+                        },
+                        onCalibrationTap = {
+                            Log.d(TAG, "onCalibrationTap called")
+                            onTap()
+                        },
+                        onFinishCalibration = {
+                            Log.d(TAG, "onFinishCalibration called")
+                            finishCalibration()
+                        },
+                        onCancelCalibration = {
+                            Log.d(TAG, "onCancelCalibration called")
+                            _isCalibrating.value = false
+                            stopCalibration()
+                            _calibrationTapCount.value = 0
+                            _calibrationAvgDev.value = 0
+                        },
+                        onGetTotalNotes = { getTotalNotes() },
+                        allProgresses = _allNotesProgress.value,
+                        onSetAllNotesProgressCallback = { setAllNotesProgressCallback() },
+                        currentLevelId = currentLevelId,
+                        currentBpm = currentBpm,
+                        onPauseGame = { pauseGame() },
+                        onResumeGame = { resumeGame() },
+                        onResetGameState = { resetGameState() },
+                        onShowResultDialog = { score -> showResultDialog(score) },
+                        onLevelCompleteCallback = { finalScore -> onLevelComplete(finalScore) }
+                    )
+
+                    // Диалог результатов (отображается поверх)
+                    if (showResultDialog) {
+                        ResultDialog(
+                            score = completedLevelScore,
+                            hasNextLevel = hasNextLevel,
+                            onRepeat = {
+                                showResultDialog = false
+                                resetGameState()
+                                startRhythm(currentBpm)
+                            },
+                            onNext = {
+                                showResultDialog = false
+                                currentLevelId++
+                                // Обновите BPM для следующего уровня (пример)
+                                currentBpm = when (currentLevelId) {
+                                    1 -> 80
+                                    2 -> 100
+                                    3 -> 120
+                                    else -> 120
+                                }
+                                resetGameState()
+                                startRhythm(currentBpm)
+                            },
+                            onSelectLevel = {
+                                showResultDialog = false
+                                resetGameState()
+                                stopRhythm()
+                                // Переключите текущий экран на выбор уровня – передайте callback из NavigationHost
+                                // Для простоты можно использовать общую переменную currentScreen, но сейчас она внутри NavigationHost.
+                                // Если вы не передаёте callback, можно через mutableState, но проще добавить параметр onNavigateToLevelSelect в NavigationHost.
+                                // Пока оставим заглушку – вам нужно реализовать смену экрана.
+                                Log.d(TAG, "Select level clicked")
+                            }
+                        )
+                    }
+                }
             }
         }
     }
@@ -754,6 +805,47 @@ fun GameScreenWithNotes(
     }
 }
 
-
+@Composable
+fun ResultDialog(
+    score: Int,
+    hasNextLevel: Boolean,
+    onRepeat: () -> Unit,
+    onNext: () -> Unit,
+    onSelectLevel: () -> Unit
+) {
+    Dialog(onDismissRequest = {}) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = Color.White,
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("Уровень пройден!", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Ваш счёт: $score", fontSize = 20.sp)
+                Spacer(modifier = Modifier.height(24.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Button(onClick = onRepeat, modifier = Modifier.weight(1f)) {
+                        Text("Повторить")
+                    }
+                    if (hasNextLevel) {
+                        Button(onClick = onNext, modifier = Modifier.weight(1f)) {
+                            Text("Следующий")
+                        }
+                    }
+                    Button(onClick = onSelectLevel, modifier = Modifier.weight(1f)) {
+                        Text("Выбор уровня")
+                    }
+                }
+            }
+        }
+    }
+}
 
 data class LevelInfo(val id: Int, val name: String, val description: String, val bpm: Int)

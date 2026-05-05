@@ -194,15 +194,15 @@ void RhythmEngine::processTap(long long tapTimeMs) {
         return;
     }
 
-    // Если это первое нажатие после старта
+    // Первое нажатие после старта
     if (mGameStartTime == 0) {
         mGameStartTime = tapTimeMs;
         LOGD("First tap, setting gameStartTime to %lld", tapTimeMs);
         return;
     }
 
+    // Если уже все ноты отыграны, но флаг не установлен
     if (mCurrentNoteIndex >= mTotalNotes) {
-        // Уровень уже завершён, но флаг не установлен – установим
         if (!mLevelCompleted) {
             mLevelCompleted = true;
             if (mLevelCompleteCallback) mLevelCompleteCallback(mCurrentScore);
@@ -214,7 +214,7 @@ void RhythmEngine::processTap(long long tapTimeMs) {
     long long elapsed = tapTimeMs - mGameStartTime;
     long long idealTimeMs = mTimeline[mCurrentNoteIndex];
 
-    int deviationMs = (int)(elapsed - idealTimeMs) + mCalibrationOffset;
+    int deviationMs = (int)(elapsed - idealTimeMs) - mCalibrationOffset;
     int score = calculateScore(deviationMs);
     const char* resultText = getResultText(deviationMs);
 
@@ -231,7 +231,6 @@ void RhythmEngine::processTap(long long tapTimeMs) {
 
     mCurrentNoteIndex++;
 
-    // Проверка завершения уровня
     if (mCurrentNoteIndex >= mTotalNotes && !mLevelCompleted) {
         mLevelCompleted = true;
         if (mLevelCompleteCallback) mLevelCompleteCallback(mCurrentScore);
