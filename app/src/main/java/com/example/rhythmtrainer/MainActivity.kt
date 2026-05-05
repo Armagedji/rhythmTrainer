@@ -8,22 +8,32 @@ import android.os.VibratorManager
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.rhythmtrainer.ui.theme.RhythmTrainerTheme
@@ -55,6 +65,9 @@ class MainActivity : ComponentActivity() {
     private external fun stopCalibration()
     private external fun getCalibrationOffset(): Int
     private external fun setCalibrationOffset(offsetMs: Int)
+    private external fun loadSong(bpm: Int, totalNotes: Int)
+    private external fun getTotalNotes(): Int
+    private external fun setNotePositionCallback()
 
     // MutableState для UI
     private val _score = mutableStateOf(0)
@@ -64,6 +77,7 @@ class MainActivity : ComponentActivity() {
     private val _calibrationTapCount = mutableStateOf(0)
     private val _calibrationAvgDev = mutableStateOf(0)
     private val _isCalibrating = mutableStateOf(false)
+    private val _notePositions = mutableStateOf<Map<Int, Float>>(emptyMap())
 
     // Callback'и из C++
     @Suppress("unused")
@@ -71,6 +85,15 @@ class MainActivity : ComponentActivity() {
         runOnUiThread {
             Log.d(TAG, "updateScore: $score")
             _score.value = score
+        }
+    }
+
+    @Suppress("unused")
+    fun updateNotePosition(index: Int, progress: Float) {
+        runOnUiThread {
+            _notePositions.value = _notePositions.value.toMutableMap().apply {
+                put(index, progress)
+            }
         }
     }
 
@@ -183,7 +206,10 @@ class MainActivity : ComponentActivity() {
                         stopCalibration()
                         _calibrationTapCount.value = 0
                         _calibrationAvgDev.value = 0
-                    }
+                    },
+                    onGetTotalNotes = { getTotalNotes() },
+                    notePositions = _notePositions.value,
+                    onSetNotePositionCallback = { setNotePositionCallback() }
                 )
             }
         }
@@ -195,8 +221,9 @@ sealed class Screen(val title: String) {
     object Learning : Screen("Обучение")
     object Settings : Screen("Настройки")
     object LevelSelect : Screen("Выбор уровня")
-    data class Game(val levelId: Int, val bpm: Int) : Screen("Тренировка")
+//    data class Game(val levelId: Int, val bpm: Int) : Screen("Тренировка")
     object Calibration : Screen("Калибровка")
+    object GameWithNotes : Screen("Тренировка")
 }
 
 @Composable
@@ -215,9 +242,13 @@ fun NavigationHost(
     onStartCalibration: () -> Unit,
     onCalibrationTap: () -> Unit,
     onFinishCalibration: () -> Unit,
-    onCancelCalibration: () -> Unit
+    onCancelCalibration: () -> Unit,
+    onGetTotalNotes: () -> Int,
+    notePositions: Map<Int, Float>,
+    onSetNotePositionCallback: () -> Unit,
 ) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.MainMenu) }
+    var currentLevelId by remember { mutableStateOf(1) }
     var currentBpm by remember { mutableStateOf(80) }
 
     Scaffold { paddingValues ->
@@ -248,27 +279,11 @@ fun NavigationHost(
                 Screen.LevelSelect -> LevelSelectScreen(
                     onBack = { currentScreen = Screen.MainMenu },
                     onLevelSelected = { levelId, bpm ->
+                        currentLevelId = levelId
                         currentBpm = bpm
-                        currentScreen = Screen.Game(levelId, bpm)
+                        currentScreen = Screen.GameWithNotes
                     }
                 )
-                is Screen.Game -> {
-                    val gameScreen = currentScreen as Screen.Game
-                    GameScreen(
-                        levelId = gameScreen.levelId,
-                        bpm = gameScreen.bpm,
-                        score = score,
-                        lastResult = lastResult,
-                        onBack = {
-                            onStopRhythm()
-                            currentScreen = Screen.MainMenu
-                        },
-                        onStartRhythm = {
-                            onStartRhythm(gameScreen.bpm)
-                        },
-                        onTap = onTap
-                    )
-                }
                 Screen.Calibration -> CalibrationScreen(
                     tapCount = calibrationTapCount,
                     avgDeviation = calibrationAvgDev,
@@ -282,6 +297,24 @@ fun NavigationHost(
                         currentScreen = Screen.Settings
                     }
                 )
+                Screen.GameWithNotes -> {
+                    val totalNotes = onGetTotalNotes() // нативная функция
+                    GameScreenWithNotes(
+                        levelId = currentLevelId,
+                        bpm = currentBpm,
+                        score = score,
+                        lastResult = lastResult,
+                        totalNotes = totalNotes,
+                        onBack = {
+                            onStopRhythm()
+                            currentScreen = Screen.MainMenu
+                        },
+                        onStartRhythm = { onStartRhythm(currentBpm) },
+                        onTap = onTap,
+                        notePositions = notePositions,
+                        onSetNotePositionCallback = onSetNotePositionCallback
+                    )
+                }
             }
         }
     }
@@ -507,6 +540,112 @@ fun GameScreen(
             onBack()
         }) {
             Text("🚪 Выйти")
+        }
+    }
+}
+
+@Composable
+fun GameScreenWithNotes(
+    levelId: Int,
+    bpm: Int,
+    score: Int,
+    lastResult: String,
+    totalNotes: Int,
+    onBack: () -> Unit,
+    onStartRhythm: () -> Unit,
+    onTap: () -> Unit,
+    notePositions: Map<Int, Float>,
+    onSetNotePositionCallback: () -> Unit
+) {
+    LaunchedEffect(Unit) {
+        onSetNotePositionCallback()
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Canvas для отрисовки нот
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val noteWidth = 40f
+            val startX = 3000f // правая сторона
+            val endX = 600f                        // левая сторона (линия попадания)
+
+            for (i in 0 until totalNotes) {
+                val progress = notePositions[i] ?: -1f
+                if (progress in 0f..1f) {
+                    val x = startX - (startX - endX) * progress
+                    val y = size.height / 2 + (if (i % 2 == 0) -30f else 30f)
+
+                    // Рисуем ноту (круг)
+                    drawCircle(
+                        color = if (progress > 0.9f) Color.Red else Color.White,
+                        radius = 40f,
+                        center = Offset(x, y)
+                    )
+                    // Рисуем стебель
+                    drawLine(
+                        color = Color.White,
+                        start = Offset(x, y),
+                        end = Offset(x, y - 60f),
+                        strokeWidth = 3f
+                    )
+                }
+            }
+
+            // Линия попадания
+            drawLine(
+                color = Color.Green,
+                start = Offset(endX, 0f),
+                end = Offset(endX, size.height),
+                strokeWidth = 5f
+            )
+        }
+
+        // Интерфейс (счёт, кнопки) поверх Canvas
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Top,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Панель счёта
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color.DarkGray
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Счёт: $score", color = Color.White, fontSize = 24.sp)
+                    Text("BPM: $bpm", color = Color.White, fontSize = 24.sp)
+                    Text("Результат: $lastResult", color = Color.White, fontSize = 20.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            // Кнопки управления
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Button(
+                    onClick = onStartRhythm,
+                    modifier = Modifier.fillMaxWidth().height(80.dp)
+                ) {
+                    Text("Запустить ритм", fontSize = 20.sp)
+                }
+                Button(
+                    onClick = onTap,
+                    modifier = Modifier.fillMaxWidth().height(80.dp).padding(top = 8.dp)
+                ) {
+                    Text("Нажми в ритм!", fontSize = 20.sp)
+                }
+                Button(
+                    onClick = onBack,
+                    modifier = Modifier.padding(top = 16.dp)
+                ) {
+                    Text("Выйти")
+                }
+            }
         }
     }
 }

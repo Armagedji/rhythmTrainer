@@ -71,6 +71,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended:1.7.5")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("com.google.oboe:oboe:1.9.0")
+    implementation(libs.androidx.compose.foundation.layout)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

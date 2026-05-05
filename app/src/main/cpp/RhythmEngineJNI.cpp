@@ -146,4 +146,38 @@ Java_com_example_rhythmtrainer_MainActivity_setCalibrationOffset(JNIEnv* env, jo
     RhythmEngine::getInstance()->setCalibrationOffset((int)offsetMs);
 }
 
+JNIEXPORT void JNICALL
+Java_com_example_rhythmtrainer_MainActivity_loadSong(JNIEnv* env, jobject /* this */, jint bpm, jint totalNotes) {
+    LOGD("loadSong called with BPM=%d, notes=%d", bpm, totalNotes);
+    RhythmEngine::getInstance()->loadSong((int)bpm, (int)totalNotes);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_example_rhythmtrainer_MainActivity_getTotalNotes(JNIEnv* env, jobject /* this */) {
+    return RhythmEngine::getInstance()->getTotalNotes();
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_rhythmtrainer_MainActivity_setNotePositionCallback(JNIEnv* env, jobject /* this */) {
+    LOGD("setNotePositionCallback called");
+    RhythmEngine::getInstance()->setNotePositionCallback([](int noteIndex, float progress) {
+        JNIEnv* env = nullptr;
+        JavaVM* vm = RhythmEngine::getInstance()->getJavaVM();
+        if (vm == nullptr) return;
+
+        int attached = vm->GetEnv((void**)&env, JNI_VERSION_1_6);
+        bool needDetach = (attached == JNI_EDETACHED);
+        if (needDetach) vm->AttachCurrentThread(&env, nullptr);
+
+        // Находим класс MainActivity и метод updateNotePosition
+        jclass clazz = env->GetObjectClass(g_javaObject);
+        jmethodID method = env->GetMethodID(clazz, "updateNotePosition", "(IF)V");
+        if (method != nullptr) {
+            env->CallVoidMethod(g_javaObject, method, noteIndex, progress);
+        }
+
+        if (needDetach) vm->DetachCurrentThread();
+    });
+}
+
 } // extern "C"

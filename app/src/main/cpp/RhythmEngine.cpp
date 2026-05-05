@@ -90,8 +90,12 @@ void RhythmEngine::restartStream() {
 void RhythmEngine::start(int bpm) {
     LOGD("start() called, BPM=%d", bpm);
 
+    // Загружаем песню с 32 нотами
+    loadSong(bpm, 32);
+
     setBpm(bpm);
     resetGame();
+    mCurrentNoteIndex = 0;
 
     if (mIsPlaying) {
         restartStream();
@@ -242,6 +246,9 @@ oboe::DataCallbackResult RhythmEngine::onAudioReady(
 
         if (isBeatStart && mIsPlaying) {
             mClickPosition = 0;
+            // Обновляем позицию ноты для UI
+            long long elapsed = getCurrentTimeMs() - mGameStartTime;
+            updateNotePosition(elapsed);
         }
 
         float sample = 0.0f;
@@ -258,6 +265,8 @@ oboe::DataCallbackResult RhythmEngine::onAudioReady(
         }
     }
 
+    long long elapsed = getCurrentTimeMs() - mGameStartTime;
+    updateNotePosition(elapsed);
     return oboe::DataCallbackResult::Continue;
 }
 
@@ -331,3 +340,48 @@ void RhythmEngine::addCalibrationTap() {
         mCalibrationCallback(mCalibrationTapCount, 0);
     }
 }
+
+void RhythmEngine::loadSong(int bpm, int totalNotes) {
+    mCurrentBpm = bpm;
+    mTotalNotes = totalNotes;
+    mTimeline.clear();
+
+    long long beatDurationMs = (60 * 1000) / bpm;
+    for (int i = 0; i < totalNotes; ++i) {
+        mTimeline.push_back(i * beatDurationMs);
+    }
+    LOGD("Song loaded: %d notes at %d BPM", totalNotes, bpm);
+}
+
+void RhythmEngine::updateNotePosition(long long elapsedMs) {
+    if (!mIsPlaying) return;
+
+    int noteIndex = -1;
+    // Ищем ближайшую ноту, которая будет в пределах видимости (за 2000 мс до идеального момента)
+    for (int i = 0; i < (int)mTimeline.size(); ++i) {
+        long long timeToNote = mTimeline[i] - elapsedMs;
+        if (timeToNote > -500 && timeToNote < 2000) {
+            noteIndex = i;
+            break;
+        }
+    }
+
+    if (noteIndex != -1 && mNotePositionCallback) {
+        long long timeToNote = mTimeline[noteIndex] - elapsedMs;
+        // progress от 0 (только появилась) до 1 (достигла цели)
+        float progress = 1.0f - (timeToNote + 500) / 2500.0f;
+        progress = std::max(0.0f, std::min(1.0f, progress));
+        mNotePositionCallback(noteIndex, progress);
+    }
+}
+
+void RhythmEngine::setNotePositionCallback(std::function<void(int, float)> callback) {
+    mNotePositionCallback = callback;
+    LOGD("Note position callback set");
+}
+
+void RhythmEngine::setCalibrationCallback(std::function<void(int, int)> callback) {
+    mCalibrationCallback = callback;
+    LOGD("Calibration callback set");
+}
+
