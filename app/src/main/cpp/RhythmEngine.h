@@ -35,6 +35,11 @@ public:
 
     void setAllNotesProgressCallback(std::function<void(const std::vector<float>&)> callback);
 
+    void setLevelCompleteCallback(std::function<void(int)> callback);
+    void pause();
+    void resume();
+    void resetGameState(); // сброс уровня без остановки аудио
+
     // JVM для callback'ов
     void setJavaVM(JavaVM* vm) { mJavaVM = vm; }
     JavaVM* getJavaVM() const { return mJavaVM; }
@@ -76,9 +81,16 @@ private:
     std::function<void(const std::vector<float>&)> mAllNotesProgressCallback;
     std::vector<float> mAllProgresses;
 
+    // Для отслеживания прогресса уровня
+    int mCurrentNoteIndex = 0;
+    bool mLevelCompleted = false;
+    std::function<void(int)> mLevelCompleteCallback;
+
+// Для паузы
+    std::atomic<bool> mIsPaused{false};
+
     // Таймлайн
     std::vector<long long> mTimeline;  // идеальные моменты нажатий в мс от начала
-    int mCurrentNoteIndex = 0;
     int mTotalNotes = 32;
 
     // Калибровка

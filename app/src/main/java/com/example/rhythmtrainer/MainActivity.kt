@@ -1,5 +1,7 @@
 package com.example.rhythmtrainer
 
+import ProgressRepository
+import android.app.AlertDialog
 import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
@@ -36,7 +38,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.lifecycleScope
 import com.example.rhythmtrainer.ui.theme.RhythmTrainerTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -69,6 +73,10 @@ class MainActivity : ComponentActivity() {
     private external fun getTotalNotes(): Int
     private external fun setNotePositionCallback()
     private external fun setAllNotesProgressCallback()
+    private external fun setLevelCompleteCallback()
+    private external fun pauseGame()
+    private external fun resumeGame()
+    private external fun resetGameState()
 
 
     // MutableState для UI
@@ -81,6 +89,10 @@ class MainActivity : ComponentActivity() {
     private val _isCalibrating = mutableStateOf(false)
     private val _notePositions = mutableStateOf<Map<Int, Float>>(emptyMap())
     private val _allNotesProgress = mutableStateOf(floatArrayOf())
+    private lateinit var progressRepository: ProgressRepository
+    private var currentLevelId by mutableStateOf(1)
+    private var currentBpm by mutableStateOf(80)
+
 
     // Callback'и из C++
     @Suppress("unused")
@@ -120,6 +132,19 @@ class MainActivity : ComponentActivity() {
     }
 
     @Suppress("unused")
+    fun onLevelComplete(finalScore: Int) {
+        runOnUiThread {
+            Log.d(TAG, "Level completed with score: $finalScore")
+            // Здесь сохраните прогресс через репозиторий и покажите диалог результатов
+            lifecycleScope.launch {
+                progressRepository.saveCompletedLevel("level_$currentLevelId")
+                progressRepository.addToTotalScore(finalScore)
+            }
+            showResultDialog(finalScore)
+        }
+    }
+
+    @Suppress("unused")
     fun updateCalibration(tapCount: Int, avgDeviation: Int) {
         runOnUiThread {
             Log.d(TAG, "updateCalibration: taps=$tapCount, avgDev=$avgDeviation")
@@ -140,6 +165,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+
+
     private fun vibrateDevice() {
         val vibratorInstance = vibrator ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -150,6 +177,33 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun showResultDialog(score: Int) {
+        AlertDialog.Builder(this)
+            .setTitle("Уровень пройден!")
+            .setMessage("Ваш счёт: $score")
+            .setPositiveButton("Повторить") { _, _ ->
+                resetGameState()
+                startRhythm(currentBpm)
+            }
+            .setNeutralButton("Следующий уровень") { _, _ ->
+                currentLevelId++
+                currentBpm = when (currentLevelId) {
+                    1 -> 80
+                    2 -> 100
+                    3 -> 120
+                    else -> 120
+                }
+                resetGameState()
+                startRhythm(currentBpm)
+            }
+            .setNegativeButton("Главное меню") { _, _ ->
+                resetGameState()
+                stopRhythm()
+                // Обновите текущий экран через колбэк (например, переданный в NavigationHost)
+            }
+            .show()
+    }
+
     private fun finishCalibration() {
         Log.d(TAG, "finishCalibration called")
         // Просто останавливаем калибровку - C++ сам вызовет callback с результатом
@@ -157,6 +211,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        progressRepository = ProgressRepository(this)
         super.onCreate(savedInstanceState)
 
         vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -221,7 +276,14 @@ class MainActivity : ComponentActivity() {
                     },
                     onGetTotalNotes = { getTotalNotes() },
                     allProgresses = _allNotesProgress.value,
-                    onSetAllNotesProgressCallback = { setAllNotesProgressCallback() }
+                    onSetAllNotesProgressCallback = { setAllNotesProgressCallback() },
+                    currentLevelId = currentLevelId,
+                    currentBpm = currentBpm,
+                    onPauseGame = { pauseGame() },
+                    onResumeGame = { resumeGame() },
+                    onResetGameState = { resetGameState() },
+                    onShowResultDialog = { score -> showResultDialog(score) },
+                    onLevelCompleteCallback = { finalScore -> onLevelComplete(finalScore) }
                 )
             }
         }
@@ -257,7 +319,15 @@ fun NavigationHost(
     onCancelCalibration: () -> Unit,
     onGetTotalNotes: () -> Int,
     allProgresses: FloatArray,
-    onSetAllNotesProgressCallback: () -> Unit
+    onSetAllNotesProgressCallback: () -> Unit,
+    currentLevelId: Int,
+    currentBpm: Int,
+    onPauseGame: () -> Unit,
+    onResumeGame: () -> Unit,
+    onResetGameState: () -> Unit,
+    onShowResultDialog: (Int) -> Unit,
+    onLevelCompleteCallback: (Int) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.MainMenu) }
     var currentLevelId by remember { mutableStateOf(1) }
@@ -324,7 +394,15 @@ fun NavigationHost(
                         onStartRhythm = { onStartRhythm(currentBpm) },
                         onTap = onTap,
                         allProgresses = allProgresses,
-                        onSetCallback = onSetAllNotesProgressCallback
+                        onSetCallback = onSetAllNotesProgressCallback,
+                        onPause = onPauseGame,
+                        onResume = onResumeGame,
+                        onReset = onResetGameState,
+                        onExit = {
+                            onResetGameState()
+                            onStopRhythm()
+                            // смена экрана – возможно, через общий колбэк
+                        },
                     )
                 }
             }
@@ -567,8 +645,14 @@ fun GameScreenWithNotes(
     onStartRhythm: () -> Unit,
     onTap: () -> Unit,
     allProgresses: FloatArray,
-    onSetCallback: () -> Unit
+    onSetCallback: () -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onReset: () -> Unit,
+    onExit: () -> Unit
 ) {
+    var isPaused by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
         onSetCallback()
     }
@@ -641,6 +725,12 @@ fun GameScreenWithNotes(
                 modifier = Modifier.padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                Button(onClick = {
+                    isPaused = !isPaused
+                    if (isPaused) onPause() else onResume()
+                }) {
+                    Text(if (isPaused) "Продолжить" else "Пауза")
+                }
                 Button(
                     onClick = onStartRhythm,
                     modifier = Modifier.fillMaxWidth().height(80.dp)
@@ -663,5 +753,7 @@ fun GameScreenWithNotes(
         }
     }
 }
+
+
 
 data class LevelInfo(val id: Int, val name: String, val description: String, val bpm: Int)

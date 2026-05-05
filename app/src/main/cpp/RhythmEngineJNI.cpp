@@ -200,6 +200,22 @@ Java_com_example_rhythmtrainer_MainActivity_setAllNotesProgressCallback(JNIEnv* 
     });
 }
 
+JNIEXPORT void JNICALL Java_com_example_rhythmtrainer_MainActivity_setLevelCompleteCallback(JNIEnv* env, jobject /* this */) {
+    RhythmEngine::getInstance()->setLevelCompleteCallback([](int finalScore) {
+        // JNI-вызов Java-метода onLevelComplete (как ранее описывалось)
+    });
+}
 
+JNIEXPORT void JNICALL Java_com_example_rhythmtrainer_MainActivity_pauseGame(JNIEnv* env, jobject /* this */) {
+    RhythmEngine::getInstance()->pause();
+}
+
+JNIEXPORT void JNICALL Java_com_example_rhythmtrainer_MainActivity_resumeGame(JNIEnv* env, jobject /* this */) {
+    RhythmEngine::getInstance()->resume();
+}
+
+JNIEXPORT void JNICALL Java_com_example_rhythmtrainer_MainActivity_resetGameState(JNIEnv* env, jobject /* this */) {
+    RhythmEngine::getInstance()->resetGameState();
+}
 
 } // extern "C"
