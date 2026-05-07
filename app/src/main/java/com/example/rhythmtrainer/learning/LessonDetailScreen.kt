@@ -1,6 +1,9 @@
 package com.example.rhythmtrainer.learning
 
 import android.net.Uri
+import android.view.Gravity
+import android.view.TextureView
+import android.widget.FrameLayout
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -13,9 +16,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.compose.PlayerSurface
 
 @Composable
 fun LessonDetailScreen(lesson: Lesson, onBack: () -> Unit) {
@@ -35,16 +38,9 @@ fun LessonDetailScreen(lesson: Lesson, onBack: () -> Unit) {
         }
     }
 
-    DisposableEffect(Unit) {
-        onDispose {
-            exoPlayer?.release()
-        }
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.White)
     ) {
         // Кнопка "Назад к списку"
         Button(
@@ -66,33 +62,49 @@ fun LessonDetailScreen(lesson: Lesson, onBack: () -> Unit) {
             Text(
                 text = lesson.title,
                 fontSize = 24.sp,
-                color = Color.Black,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
             Text(
                 text = lesson.description,
                 fontSize = 16.sp,
-                color = Color.Black,
-                modifier = Modifier.padding(bottom = 16.dp)
+                modifier = Modifier.padding(bottom = 8.dp)
             )
 
             if (lesson.videoResId != null && exoPlayer != null) {
-                Box(
+                AndroidView(
+                    factory = { context ->
+                        // Создаём контейнер
+                        val frameLayout = FrameLayout(context)
+                        frameLayout.layoutParams = FrameLayout.LayoutParams(
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            FrameLayout.LayoutParams.MATCH_PARENT
+                        )
+
+                        // Создаём TextureView
+                        val textureView = TextureView(context)
+                        textureView.layoutParams = FrameLayout.LayoutParams(
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            Gravity.CENTER
+                        )
+                        frameLayout.addView(textureView)
+
+                        // Назначаем TextureView плееру
+                        exoPlayer?.setVideoTextureView(textureView)
+
+                        // Не используем стандартный PlayerView, чтобы избежать конфликтов
+                        frameLayout
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(240.dp)
-                ) {
-                    PlayerSurface(
-                        player = exoPlayer,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
+                )
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { exoPlayer?.play() }) { Text("Play") }
                     Button(onClick = { exoPlayer?.pause() }) { Text("Pause") }
                 }
-            } else if (lesson.videoResId != null && exoPlayer == null) {
+            } else if (lesson.videoResId != null) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
