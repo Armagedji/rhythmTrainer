@@ -1,5 +1,7 @@
 package com.example.rhythmtrainer.ui.screens
 
+import com.example.rhythmtrainer.model.LevelInfo
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -8,7 +10,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.rhythmtrainer.LevelInfo
 import com.example.rhythmtrainer.ranks.GameResultsStorage
 import com.example.rhythmtrainer.ranks.getCurrentRank
 import com.example.rhythmtrainer.ranks.getNextRank

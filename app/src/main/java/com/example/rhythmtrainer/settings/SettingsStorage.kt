@@ -14,7 +14,6 @@ class SettingsStorage(context: Context) {
         private const val KEY_SOUND_ENABLED = "sound_enabled"
         private const val KEY_CALIBRATION_OFFSET = "calibration_offset"
 
-        // Значения по умолчанию
         const val DEFAULT_VIBRATION_ENABLED = true
         const val DEFAULT_SOUND_ENABLED = true
         const val DEFAULT_CALIBRATION_OFFSET = 0
