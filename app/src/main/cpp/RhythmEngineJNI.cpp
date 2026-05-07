@@ -22,6 +22,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
 
 JNIEXPORT void JNICALL
 Java_com_example_rhythmtrainer_MainActivity_nativeInit(JNIEnv* env, jobject thiz) {
+    g_javaObject = env->NewGlobalRef(thiz);
     LOGD("nativeInit called");
 
     // Сохраняем глобальную ссылку на объект MainActivity
@@ -31,10 +32,12 @@ Java_com_example_rhythmtrainer_MainActivity_nativeInit(JNIEnv* env, jobject thiz
     g_javaObject = env->NewGlobalRef(thiz);
 
     // Получаем методы для callback'ов
+
     jclass clazz = env->GetObjectClass(g_javaObject);
     g_updateScoreMethod = env->GetMethodID(clazz, "updateScore", "(I)V");
     g_updateResultMethod = env->GetMethodID(clazz, "updateResult", "(Ljava/lang/String;)V");
     g_updateCalibrationMethod = env->GetMethodID(clazz, "updateCalibration", "(II)V");
+    g_updateAllNotesProgressMethod = env->GetMethodID(clazz, "updateAllNotesProgress", "([F)V");
 
     // Устанавливаем callback для игровых очков
     RhythmEngine::getInstance()->setScoreUpdateCallback([](int score, const char* result) {
@@ -181,41 +184,36 @@ Java_com_example_rhythmtrainer_MainActivity_setNotePositionCallback(JNIEnv* env,
     });
 }
 
+
+
+// В nativeInit получите метод:
+
+
+// И функция:
 JNIEXPORT void JNICALL
 Java_com_example_rhythmtrainer_MainActivity_setAllNotesProgressCallback(JNIEnv* env, jobject /* this */) {
-    RhythmEngine::getInstance()->setAllNotesProgressCallback([=](const std::vector<float>& progresses) {
+    LOGD("setAllNotesProgressCallback called");
+    RhythmEngine::getInstance()->setAllNotesProgressCallback([](const std::vector<float>& progresses) {
         JNIEnv* env = nullptr;
         JavaVM* vm = RhythmEngine::getInstance()->getJavaVM();
         if (vm == nullptr) return;
         int attached = vm->GetEnv((void**)&env, JNI_VERSION_1_6);
         bool needDetach = (attached == JNI_EDETACHED);
         if (needDetach) vm->AttachCurrentThread(&env, nullptr);
+
         jfloatArray array = env->NewFloatArray(progresses.size());
         env->SetFloatArrayRegion(array, 0, progresses.size(), progresses.data());
+
         jclass clazz = env->GetObjectClass(g_javaObject);
-        jmethodID method = env->GetMethodID(clazz, "updateAllNotesProgress", "([F)V");
-        env->CallVoidMethod(g_javaObject, method, array);
+        jmethodID method = g_updateAllNotesProgressMethod; // уже получен
+        if (method != nullptr) {
+            env->CallVoidMethod(g_javaObject, method, array);
+        } else {
+            LOGD("updateAllNotesProgress method not found");
+        }
         env->DeleteLocalRef(array);
         if (needDetach) vm->DetachCurrentThread();
     });
-}
-
-JNIEXPORT void JNICALL Java_com_example_rhythmtrainer_MainActivity_setLevelCompleteCallback(JNIEnv* env, jobject /* this */) {
-    RhythmEngine::getInstance()->setLevelCompleteCallback([](int finalScore) {
-        // JNI-вызов Java-метода onLevelComplete (как ранее описывалось)
-    });
-}
-
-JNIEXPORT void JNICALL Java_com_example_rhythmtrainer_MainActivity_pauseGame(JNIEnv* env, jobject /* this */) {
-    RhythmEngine::getInstance()->pause();
-}
-
-JNIEXPORT void JNICALL Java_com_example_rhythmtrainer_MainActivity_resumeGame(JNIEnv* env, jobject /* this */) {
-    RhythmEngine::getInstance()->resume();
-}
-
-JNIEXPORT void JNICALL Java_com_example_rhythmtrainer_MainActivity_resetGameState(JNIEnv* env, jobject /* this */) {
-    RhythmEngine::getInstance()->resetGameState();
 }
 
 } // extern "C"

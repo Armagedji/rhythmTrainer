@@ -26,19 +26,16 @@ public:
     void setScoreUpdateCallback(std::function<void(int, const char*)> callback);
     void setNotePositionCallback(std::function<void(int index, float progress)> callback);
 
+    void setAllNotesProgressCallback(std::function<void(const std::vector<float>&)> callback);
+    std::vector<float> mAllProgresses;
+    std::function<void(const std::vector<float>&)> mAllNotesProgressCallback;
+
     // Калибровка
     void startCalibration(int bpm = 120);
     void stopCalibration();
     int getCalibrationOffset() const { return mCalibrationOffset; }
     void setCalibrationOffset(int offsetMs);
     void setCalibrationCallback(std::function<void(int, int)> callback);
-
-    void setAllNotesProgressCallback(std::function<void(const std::vector<float>&)> callback);
-
-    void setLevelCompleteCallback(std::function<void(int)> callback);
-    void pause();
-    void resume();
-    void resetGameState(); // сброс уровня без остановки аудио
 
     // JVM для callback'ов
     void setJavaVM(JavaVM* vm) { mJavaVM = vm; }
@@ -52,6 +49,8 @@ public:
 
     int getTotalNotes() const { return mTotalNotes; }
     void loadSong(int bpm, int totalNotes);
+
+
 
 private:
     std::mutex mMutex;
@@ -78,19 +77,10 @@ private:
     std::function<void(int, const char*)> mScoreCallback;
     std::function<void(int, float)> mNotePositionCallback;
 
-    std::function<void(const std::vector<float>&)> mAllNotesProgressCallback;
-    std::vector<float> mAllProgresses;
-
-    // Для отслеживания прогресса уровня
-    int mCurrentNoteIndex = 0;
-    bool mLevelCompleted = false;
-    std::function<void(int)> mLevelCompleteCallback;
-
-// Для паузы
-    std::atomic<bool> mIsPaused{false};
 
     // Таймлайн
     std::vector<long long> mTimeline;  // идеальные моменты нажатий в мс от начала
+    int mCurrentNoteIndex = 0;
     int mTotalNotes = 32;
 
     // Калибровка
@@ -110,6 +100,7 @@ private:
     void processTap(long long tapTimeMs);
     const char* getResultText(int deviationMs);
     int calculateScore(int deviationMs);
+
 };
 
 #endif // RHYTHMENGINE_H

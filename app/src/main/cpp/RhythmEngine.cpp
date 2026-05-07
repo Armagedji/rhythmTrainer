@@ -95,10 +95,7 @@ void RhythmEngine::start(int bpm) {
 
     setBpm(bpm);
     resetGame();
-
-    mCurrentScore = 0;
     mCurrentNoteIndex = 0;
-    mLevelCompleted = false;
 
     if (mIsPlaying) {
         restartStream();
@@ -141,14 +138,10 @@ void RhythmEngine::stop() {
     mIsPlaying = false;
     mNeedsRestart = false;
 
-    mCurrentNoteIndex = 0;
-    mLevelCompleted = false;
-
     if (mStream) {
         mStream->stop();
         closeStream();
     }
-
     LOGD("Rhythm stopped");
 }
 
@@ -189,32 +182,27 @@ int RhythmEngine::calculateScore(int deviationMs) {
 }
 
 void RhythmEngine::processTap(long long tapTimeMs) {
-    if (!mIsPlaying || mIsPaused || mLevelCompleted) {
-        LOGD("Tap ignored - game not active or paused or completed");
+    if (!mIsPlaying) {
+        LOGD("Tap ignored - game not playing");
         return;
     }
 
-    // Первое нажатие после старта
+    // Если это первое нажатие после старта
     if (mGameStartTime == 0) {
         mGameStartTime = tapTimeMs;
         LOGD("First tap, setting gameStartTime to %lld", tapTimeMs);
-        return;
-    }
-
-    // Если уже все ноты отыграны, но флаг не установлен
-    if (mCurrentNoteIndex >= mTotalNotes) {
-        if (!mLevelCompleted) {
-            mLevelCompleted = true;
-            if (mLevelCompleteCallback) mLevelCompleteCallback(mCurrentScore);
-            mIsPlaying = false;
-        }
-        return;
+        return; // Не оцениваем первое нажатие
     }
 
     long long elapsed = tapTimeMs - mGameStartTime;
-    long long idealTimeMs = mTimeline[mCurrentNoteIndex];
+    long long beatDurationMs = (60 * 1000) / mCurrentBpm;
 
-    int deviationMs = (int)(elapsed - idealTimeMs) - mCalibrationOffset;
+    long long beatNumber = (elapsed + beatDurationMs / 2) / beatDurationMs;
+    long long idealTimeMs = beatNumber * beatDurationMs;
+
+    // Учитываем калибровочное смещение
+    int deviationMs = (int)(elapsed - idealTimeMs) + mCalibrationOffset;
+    LOGD("Tap: offset=%d, final_dev=%d", mCalibrationOffset, deviationMs);
     int score = calculateScore(deviationMs);
     const char* resultText = getResultText(deviationMs);
 
@@ -222,19 +210,11 @@ void RhythmEngine::processTap(long long tapTimeMs) {
         mCurrentScore += score;
     }
 
-    LOGD("Tap note %d: elapsed=%lld, ideal=%lld, dev=%d, result=%s, score=%d, total=%d",
-         mCurrentNoteIndex, elapsed, idealTimeMs, deviationMs, resultText, score, mCurrentScore.load());
+    LOGD("Tap: elapsed=%lld, ideal=%lld, raw_dev=%lld, offset=%d, final_dev=%d, result=%s, score=%d, total=%d",
+         elapsed, idealTimeMs, (elapsed - idealTimeMs), mCalibrationOffset, deviationMs, resultText, score, mCurrentScore.load());
 
     if (mScoreCallback) {
         mScoreCallback(mCurrentScore.load(), resultText);
-    }
-
-    mCurrentNoteIndex++;
-
-    if (mCurrentNoteIndex >= mTotalNotes && !mLevelCompleted) {
-        mLevelCompleted = true;
-        if (mLevelCompleteCallback) mLevelCompleteCallback(mCurrentScore);
-        mIsPlaying = false;
     }
 }
 
@@ -249,8 +229,14 @@ void RhythmEngine::onTap() {
     }
 }
 
-oboe::DataCallbackResult RhythmEngine::onAudioReady(oboe::AudioStream* oboeStream, void* audioData, int32_t numFrames) {
-    if (mNeedsRestart) return oboe::DataCallbackResult::Continue;
+oboe::DataCallbackResult RhythmEngine::onAudioReady(
+        oboe::AudioStream* oboeStream,
+        void* audioData,
+        int32_t numFrames) {
+
+    if (mNeedsRestart) {
+        return oboe::DataCallbackResult::Continue;
+    }
 
     float* output = static_cast<float*>(audioData);
     int32_t beatDurationFrames = getBeatDurationFrames();
@@ -258,27 +244,29 @@ oboe::DataCallbackResult RhythmEngine::onAudioReady(oboe::AudioStream* oboeStrea
     for (int i = 0; i < numFrames; ++i) {
         bool isBeatStart = (mFrameCounter % beatDurationFrames == 0);
 
-        if (isBeatStart && mIsPlaying && !mIsPaused) {
+        if (isBeatStart && mIsPlaying) {
             mClickPosition = 0;
+            // Обновляем позицию ноты для UI
             long long elapsed = getCurrentTimeMs() - mGameStartTime;
             updateNotePosition(elapsed);
         }
 
         float sample = 0.0f;
-        if (mClickPosition < (int)mClickBuffer.size() && mIsPlaying && !mIsPaused) {
+        if (mClickPosition < (int)mClickBuffer.size() && mIsPlaying) {
             sample = mClickBuffer[mClickPosition];
             mClickPosition++;
         }
 
         output[i] = sample;
         mFrameCounter++;
-        if (mFrameCounter >= beatDurationFrames * 8) mFrameCounter = 0;
+
+        if (mFrameCounter >= beatDurationFrames * 8) {
+            mFrameCounter = 0;
+        }
     }
 
-    if (mIsPlaying && !mIsPaused && mGameStartTime != 0) {
-        long long elapsed = getCurrentTimeMs() - mGameStartTime;
-        updateNotePosition(elapsed);
-    }
+    long long elapsed = getCurrentTimeMs() - mGameStartTime;
+    updateNotePosition(elapsed);
     return oboe::DataCallbackResult::Continue;
 }
 
@@ -365,6 +353,26 @@ void RhythmEngine::loadSong(int bpm, int totalNotes) {
     LOGD("Song loaded: %d notes at %d BPM", totalNotes, bpm);
 }
 
+void RhythmEngine::updateNotePosition(long long elapsedMs) {
+    if (!mIsPlaying) return;
+    const long long LEAD_TIME_MS = 2000;  // нота видна за 2 секунды до удара
+    const long long TAIL_TIME_MS = 2000;  // и 2 секунды после (симметрично для progress 0.5 в момент удара)
+
+    mAllProgresses.resize(mTotalNotes);
+    for (int i = 0; i < mTotalNotes; ++i) {
+        long long timeToHit = mTimeline[i] - elapsedMs;
+        // progress = 0 при timeToHit = LEAD_TIME_MS (появление)
+        // progress = 0.5 при timeToHit = 0 (удар)
+        // progress = 1 при timeToHit = -TAIL_TIME_MS (исчезновение)
+        float progress = (LEAD_TIME_MS - timeToHit) / (float)(LEAD_TIME_MS + TAIL_TIME_MS);
+        progress = std::max(0.0f, std::min(1.0f, progress));
+        mAllProgresses[i] = progress;
+    }
+    if (mAllNotesProgressCallback) {
+        mAllNotesProgressCallback(mAllProgresses);
+    }
+}
+
 void RhythmEngine::setNotePositionCallback(std::function<void(int, float)> callback) {
     mNotePositionCallback = callback;
     LOGD("Note position callback set");
@@ -378,47 +386,4 @@ void RhythmEngine::setCalibrationCallback(std::function<void(int, int)> callback
 void RhythmEngine::setAllNotesProgressCallback(std::function<void(const std::vector<float>&)> callback) {
     mAllNotesProgressCallback = callback;
     LOGD("All notes progress callback set");
-}
-
-void RhythmEngine::updateNotePosition(long long elapsedMs) {
-    if (!mIsPlaying || mIsPaused) return;
-    const long long LEAD_TIME_MS = 2000;
-    const long long TAIL_TIME_MS = 500;
-    mAllProgresses.resize(mTotalNotes);
-    for (int i = 0; i < mTotalNotes; ++i) {
-        long long timeToHit = mTimeline[i] - elapsedMs;
-        if (timeToHit > -TAIL_TIME_MS && timeToHit < LEAD_TIME_MS) {
-            float progress = 1.0f - (float)(timeToHit + TAIL_TIME_MS) / (LEAD_TIME_MS + TAIL_TIME_MS);
-            progress = std::max(0.0f, std::min(1.0f, progress));
-            mAllProgresses[i] = progress;
-        } else {
-            mAllProgresses[i] = -1.0f;
-        }
-    }
-    if (mAllNotesProgressCallback) {
-        mAllNotesProgressCallback(mAllProgresses);
-    }
-}
-
-void RhythmEngine::setLevelCompleteCallback(std::function<void(int)> callback) {
-    mLevelCompleteCallback = callback;
-}
-
-void RhythmEngine::pause() {
-    mIsPaused = true;
-    LOGD("Game paused");
-}
-
-void RhythmEngine::resume() {
-    mIsPaused = false;
-    LOGD("Game resumed");
-}
-
-void RhythmEngine::resetGameState() {
-    mCurrentNoteIndex = 0;
-    mCurrentScore = 0;
-    mLevelCompleted = false;
-    mGameStartTime = 0;
-    // Не останавливаем аудио, просто сбрасываем состояние уровня
-    LOGD("Game state reset");
 }
