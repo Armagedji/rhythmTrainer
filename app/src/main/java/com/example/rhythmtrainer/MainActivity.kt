@@ -45,12 +45,17 @@ import kotlinx.coroutines.launch
 import com.example.rhythmtrainer.learning.LearningScreen
 import com.example.rhythmtrainer.ui.screens.LevelSelectScreen
 import com.example.rhythmtrainer.ranks.GameResultsStorage
+import com.example.rhythmtrainer.ui.screens.SettingsScreen
+import com.example.rhythmtrainer.ui.screens.CalibrationScreen
+import com.example.rhythmtrainer.settings.SettingsStorage
 
 class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
     }
+
+    private lateinit var settingsStorage: SettingsStorage
 
     private var vibrator: Vibrator? = null
 
@@ -144,6 +149,7 @@ class MainActivity : ComponentActivity() {
                 val offset = -avgDeviation
                 setCalibrationOffset(offset)
                 _calibrationOffset.value = offset
+                settingsStorage.calibrationOffset = offset
                 Log.d(TAG, "Calibration saved: offset=$offset ms")
                 _isCalibrating.value = false
                 _calibrationTapCount.value = 0
@@ -219,6 +225,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         gameResultsStorage = GameResultsStorage(this)
+        settingsStorage = SettingsStorage(this)
+        _vibrationEnabled.value = settingsStorage.vibrationEnabled
+        _calibrationOffset.value = settingsStorage.calibrationOffset
+        setCalibrationOffset(settingsStorage.calibrationOffset)
 
         vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val vibratorManager = getSystemService(VIBRATOR_MANAGER_SERVICE) as VibratorManager
@@ -255,7 +265,10 @@ class MainActivity : ComponentActivity() {
                         onStartLevel = { bpm -> startLevel(bpm) },
                         onStopRhythm = { stopRhythm() },
                         onTap = { onTap() },
-                        onVibrationChanged = { enabled -> _vibrationEnabled.value = enabled },
+                        onVibrationChanged = {
+                            enabled -> _vibrationEnabled.value = enabled
+                            settingsStorage.vibrationEnabled = enabled
+                                             },
                         onStartCalibration = {
                             _isCalibrating.value = true
                             _calibrationTapCount.value = 0
@@ -365,8 +378,10 @@ fun NavigationHost(
                 Screen.Learning -> LearningScreen(onBack = { onNavigate(Screen.MainMenu) })
                 Screen.Settings -> SettingsScreen(
                     vibrationEnabled = vibrationEnabled,
+                    soundEnabled = true,
                     calibrationOffset = calibrationOffset,
                     onVibrationChanged = onVibrationChanged,
+                    onSoundChanged = { enabled -> /* сохранение звука */ },
                     onStartCalibration = onStartCalibration,
                     onBack = { onNavigate(Screen.MainMenu) }
                 )
@@ -418,120 +433,6 @@ fun MainMenuScreen(onNavigate: (Screen) -> Unit) {
         }
         Button(onClick = { onNavigate(Screen.Settings) }) {
             Text("Настройки", fontSize = 20.sp)
-        }
-    }
-}
-
-@Composable
-fun LearningScreen(onBack: () -> Unit) {
-    Column(
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.fillMaxSize()
-    ) {
-        Text(
-            text = "Что такое ритм?\n\n" +
-                    "Ритм – это чередование звуков разной длительности.\n\n" +
-                    "В этом приложении вы будете нажимать на экран в такт музыке.\n\n" +
-                    "Точность нажатий оценивается как:\n" +
-                    "• Perfect – идеальное попадание (+10 очков)\n" +
-                    "• Good – небольшое отклонение (+5 очков)\n" +
-                    "• Miss – промах (0 очков)\n\n" +
-                    "Начинайте с простых уровней и постепенно усложняйте!",
-            fontSize = 16.sp
-        )
-        Button(onClick = onBack) {
-            Text("Назад")
-        }
-    }
-}
-
-@Composable
-fun SettingsScreen(
-    vibrationEnabled: Boolean,
-    calibrationOffset: Int,
-    onVibrationChanged: (Boolean) -> Unit,
-    onStartCalibration: () -> Unit,
-    onBack: () -> Unit
-) {
-    var soundEnabled by remember { mutableStateOf(true) }
-
-    Column(
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Button(onClick = { soundEnabled = !soundEnabled }) {
-            Text("Звук: ${if (soundEnabled) "Вкл" else "Выкл"}")
-        }
-        Button(onClick = { onVibrationChanged(!vibrationEnabled) }) {
-            Text("Вибрация: ${if (vibrationEnabled) "Вкл" else "Выкл"}")
-        }
-        Text("Калибровка: $calibrationOffset мс", fontSize = 16.sp)
-        Button(onClick = onStartCalibration) {
-            Text("🎯 Калибровать задержку")
-        }
-        Button(onClick = onBack) {
-            Text("Назад")
-        }
-    }
-}
-
-@Composable
-fun CalibrationScreen(
-    tapCount: Int,
-    avgDeviation: Int,
-    onTap: () -> Unit,
-    onFinish: () -> Unit,
-    onCancel: () -> Unit
-) {
-    Column(
-        verticalArrangement = Arrangement.spacedBy(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.fillMaxSize()
-    ) {
-        Text(
-            text = "Калибровка задержки\n\n" +
-                    "Слушайте ритм и нажимайте на кнопку\n" +
-                    "в такт метроному.\n\n" +
-                    "Сделайте 8-10 нажатий для точной калибровки.",
-            fontSize = 18.sp
-        )
-
-        Text(
-            text = "Нажатий: $tapCount",
-            fontSize = 20.sp
-        )
-
-        if (avgDeviation != 0 && tapCount >= 5) {
-            Text(
-                text = "Среднее отклонение: $avgDeviation мс",
-                fontSize = 16.sp,
-                color = if (kotlin.math.abs(avgDeviation) < 30)
-                    androidx.compose.ui.graphics.Color.Green
-                else
-                    androidx.compose.ui.graphics.Color.Yellow
-            )
-        }
-
-        Button(
-            onClick = onTap,
-            modifier = Modifier
-                .fillMaxWidth(0.8f)
-                .height(100.dp)
-        ) {
-            Text("👆 Нажми в ритм!", fontSize = 20.sp)
-        }
-
-        Button(
-            onClick = onFinish,
-            modifier = Modifier.fillMaxWidth(0.8f),
-            enabled = tapCount >= 3
-        ) {
-            Text(if (tapCount >= 3) "✅ Завершить калибровку" else "Сделайте хотя бы 3 нажатия")
-        }
-
-        Button(onClick = onCancel) {
-            Text("❌ Отмена")
         }
     }
 }

@@ -46,7 +46,6 @@ android {
     }
 
     defaultConfig {
-        // ... существующий код ...
         externalNativeBuild {
             cmake {
                 arguments("-DANDROID_STL=c++_shared")
