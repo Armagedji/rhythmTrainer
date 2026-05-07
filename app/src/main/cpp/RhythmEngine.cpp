@@ -355,30 +355,19 @@ void RhythmEngine::loadSong(int bpm, int totalNotes) {
 
 void RhythmEngine::updateNotePosition(long long elapsedMs) {
     if (!mIsPlaying) return;
-
-    // Время упреждения (сколько миллисекунд нота видна до идеального момента)
-    const long long LEAD_TIME_MS = 3000;   // 3 секунды до удара
-    // Время после идеального момента, пока нота ещё видна (опционально, можно сделать 0)
-    const long long TAIL_TIME_MS = 500;
+    const long long LEAD_TIME_MS = 2000;  // нота видна за 2 секунды до удара
+    const long long TAIL_TIME_MS = 2000;  // и 2 секунды после (симметрично для progress 0.5 в момент удара)
 
     mAllProgresses.resize(mTotalNotes);
-
     for (int i = 0; i < mTotalNotes; ++i) {
-        long long timeToHit = mTimeline[i] - elapsedMs; // сколько осталось до идеального нажатия
-        // Нормализуем время: от LEAD_TIME_MS (появление) до -TAIL_TIME_MS (исчезновение)
-        // Прогресс 0.5 соответствует timeToHit = 0 (идеальный момент)
-        // Формула: progress = (LEAD_TIME_MS - timeToHit) / (LEAD_TIME_MS + TAIL_TIME_MS)
-        // При timeToHit = LEAD_TIME_MS → progress = 0 (появление)
-        // При timeToHit = -TAIL_TIME_MS → progress = 1 (исчезновение)
-        // При timeToHit = 0 → progress = LEAD_TIME_MS / (LEAD_TIME_MS + TAIL_TIME_MS) ≈ 0.5
-        // Чтобы progress 0.5 точно соответствовал линии, нужно подобрать LEAD_TIME_MS = TAIL_TIME_MS,
-        // но тогда появление и исчезновение симметричны. Или оставить как есть, а в UI подстроить линию.
+        long long timeToHit = mTimeline[i] - elapsedMs;
+        // progress = 0 при timeToHit = LEAD_TIME_MS (появление)
+        // progress = 0.5 при timeToHit = 0 (удар)
+        // progress = 1 при timeToHit = -TAIL_TIME_MS (исчезновение)
         float progress = (LEAD_TIME_MS - timeToHit) / (float)(LEAD_TIME_MS + TAIL_TIME_MS);
         progress = std::max(0.0f, std::min(1.0f, progress));
-
         mAllProgresses[i] = progress;
     }
-
     if (mAllNotesProgressCallback) {
         mAllNotesProgressCallback(mAllProgresses);
     }

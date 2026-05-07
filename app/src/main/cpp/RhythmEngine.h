@@ -50,6 +50,8 @@ public:
     int getTotalNotes() const { return mTotalNotes; }
     void loadSong(int bpm, int totalNotes);
 
+
+
 private:
     std::mutex mMutex;
     RhythmEngine();
@@ -98,6 +100,7 @@ private:
     void processTap(long long tapTimeMs);
     const char* getResultText(int deviationMs);
     int calculateScore(int deviationMs);
+
 };
 
 #endif // RHYTHMENGINE_H

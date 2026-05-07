@@ -159,13 +159,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateNoteColorFromResult(result: String) {
-        // Находим ближайшую ноту с прогрессом > 0.4 и < 0.6 (в районе линии)
-        val currentPositions = _notePositions.value
-        val targetIndex = currentPositions.entries
-            .filter { it.value in 0.4f..0.6f }
-            .minByOrNull { kotlin.math.abs(it.value - 0.5f) }
-            ?.key
-        if (targetIndex != null) {
+        val progresses = _allProgresses.value
+        var targetIndex = -1
+        var minDist = 1f
+        for (i in progresses.indices) {
+            val dist = kotlin.math.abs(progresses[i] - 0.5f)
+            if (dist < minDist) {
+                minDist = dist
+                targetIndex = i
+            }
+        }
+        if (targetIndex != -1 && minDist < 0.1f) {
             val color = when {
                 result.contains("Perfect") -> Color.Green
                 result.contains("Good") -> Color.Yellow
@@ -191,7 +195,8 @@ class MainActivity : ComponentActivity() {
         levelCompletionJob?.cancel()
         _score.value = 0
         _lastResult.value = ""
-        _noteColors.value = emptyMap()   // сброс цветов
+        _allProgresses.value = floatArrayOf()  // очистка прогрессов
+        _noteColors.value = emptyMap()     // сброс цветов
         startRhythm(bpm)
         val beatDurationMs = 60000L / bpm
         val durationMs = (notesCount - 1) * beatDurationMs
@@ -274,6 +279,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onGetTotalNotes = { getTotalNotes() },
                         allProgresses = _allProgresses.value,
+                        noteColors = _noteColors.value
                     )
 
                     // Диалог результатов
@@ -342,6 +348,7 @@ fun NavigationHost(
     onCancelCalibration: () -> Unit,
     onGetTotalNotes: () -> Int,
     allProgresses: FloatArray,
+    noteColors: Map<Int, Color>,
 ) {
     Scaffold { paddingValues ->
         Column(
@@ -387,6 +394,7 @@ fun NavigationHost(
                         onStartLevel = { onStartLevel(currentBpm) },
                         onTap = onTap,
                         allProgresses = allProgresses,
+                        noteColors = noteColors
                     )
                 }
             }
@@ -564,12 +572,11 @@ fun GameScreenWithNotes(
     lastResult: String,
     totalNotes: Int,
     allProgresses: FloatArray,
+    noteColors: Map<Int, Color>,
     onBack: () -> Unit,
     onStartLevel: () -> Unit,
     onTap: () -> Unit
 ) {
-    // Убираем вызов onSetNotePositionCallback – он теперь не нужен
-
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val screenWidth = maxWidth
         val screenHeight = maxHeight
@@ -578,21 +585,21 @@ fun GameScreenWithNotes(
             val widthPx = size.width
             val heightPx = size.height
 
-            drawRect(color = Color.Black, size = size) // фон
+            // Фон (чёрный для контраста)
+            drawRect(color = Color.Black, size = size)
 
-            // Параметры пути ноты
-            val startX = widthPx + 200f      // за правым краем
-            val endX = -200f                 // за левым краем
-            val hitLineX = widthPx / 2f      // линия попадания – центр
+            // Параметры движения нот
+            val startX = widthPx + 200f   // за правым краем
+            val endX = -200f              // за левым краем
+            val hitLineX = widthPx / 2f   // центральная линия
 
             for (i in 0 until totalNotes) {
                 val progress = if (i < allProgresses.size) allProgresses[i] else -1f
                 if (progress in 0f..1f) {
-                    // Линейная интерполяция от startX до endX
+                    // Линейная интерполяция координаты X
                     val x = startX + (endX - startX) * progress
                     val y = heightPx / 2 + (if (i % 2 == 0) -40f else 40f)
-                    val noteColor = Color.White
-//                    val noteColor = noteColors[i] ?: Color.White
+                    val noteColor = noteColors[i] ?: Color.White
 
                     drawOval(
                         color = noteColor,
@@ -601,13 +608,14 @@ fun GameScreenWithNotes(
                     )
                     drawLine(
                         color = noteColor,
-                        start = Offset(x + 30f, y - 20f),
-                        end = Offset(x + 30f, y + 20f),
-                        strokeWidth = 4f
+                        start = Offset(x + 27f, y - 90f),
+                        end = Offset(x + 27f, y),
+                        strokeWidth = 5f
                     )
                 }
             }
 
+            // Зелёная линия попадания
             drawLine(
                 color = Color.Green,
                 start = Offset(hitLineX, 0f),
