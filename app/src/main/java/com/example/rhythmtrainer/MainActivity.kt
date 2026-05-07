@@ -1,5 +1,6 @@
 package com.example.rhythmtrainer
 
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
@@ -82,6 +83,7 @@ class MainActivity : ComponentActivity() {
 
     private val _score = mutableIntStateOf(0)
     private val _lastResult = mutableStateOf("")
+    private val _soundEnabled = mutableStateOf(true)
     private val _vibrationEnabled = mutableStateOf(true)
     private val _calibrationOffset = mutableStateOf(getCalibrationOffset())
     private val _calibrationTapCount = mutableStateOf(0)
@@ -181,6 +183,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun setSoundEnabled(enabled: Boolean) {
+        val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        if (enabled) {
+            audioManager.setStreamVolume(
+                AudioManager.STREAM_MUSIC,
+                audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) / 2,
+                0
+            )
+        } else {
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
+        }
+    }
+
     private fun vibrateDevice() {
         val vibratorInstance = vibrator ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -226,9 +241,12 @@ class MainActivity : ComponentActivity() {
 
         gameResultsStorage = GameResultsStorage(this)
         settingsStorage = SettingsStorage(this)
+        _soundEnabled.value = settingsStorage.soundEnabled
         _vibrationEnabled.value = settingsStorage.vibrationEnabled
         _calibrationOffset.value = settingsStorage.calibrationOffset
+
         setCalibrationOffset(settingsStorage.calibrationOffset)
+        setSoundEnabled(settingsStorage.soundEnabled)
 
         vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val vibratorManager = getSystemService(VIBRATOR_MANAGER_SERVICE) as VibratorManager
@@ -236,6 +254,10 @@ class MainActivity : ComponentActivity() {
         } else {
             @Suppress("DEPRECATION")
             getSystemService(VIBRATOR_SERVICE) as Vibrator
+        }
+
+        val onSoundChanged: (Boolean) -> Unit = { enabled ->
+            setSoundEnabled(enabled)
         }
 
         nativeInit()
@@ -249,9 +271,9 @@ class MainActivity : ComponentActivity() {
                         currentScreen = currentScreen,
                         score = _score.value,
                         lastResult = _lastResult.value,
+                        soundEnabled = _soundEnabled.value,
                         vibrationEnabled = _vibrationEnabled.value,
                         calibrationOffset = _calibrationOffset.value,
-                        isCalibrating = _isCalibrating.value,
                         calibrationTapCount = _calibrationTapCount.value,
                         calibrationAvgDev = _calibrationAvgDev.value,
                         currentLevelId = currentLevelId,
@@ -265,6 +287,11 @@ class MainActivity : ComponentActivity() {
                         onStartLevel = { bpm -> startLevel(bpm) },
                         onStopRhythm = { stopRhythm() },
                         onTap = { onTap() },
+                        onSoundChanged ={
+                            enabled -> _soundEnabled.value = enabled
+                            settingsStorage.soundEnabled = enabled
+                            setSoundEnabled(enabled)
+                                         },
                         onVibrationChanged = {
                             enabled -> _vibrationEnabled.value = enabled
                             settingsStorage.vibrationEnabled = enabled
@@ -288,7 +315,7 @@ class MainActivity : ComponentActivity() {
                         onGetTotalNotes = { getTotalNotes() },
                         allProgresses = _allProgresses.value,
                         noteColors = _noteColors.value,
-                        gameResultsStorage = gameResultsStorage
+                        gameResultsStorage = gameResultsStorage,
                     )
 
                     if (showResultDialog) {
@@ -343,9 +370,9 @@ fun NavigationHost(
     currentScreen: Screen,
     score: Int,
     lastResult: String,
+    soundEnabled: Boolean,
     vibrationEnabled: Boolean,
     calibrationOffset: Int,
-    isCalibrating: Boolean,
     calibrationTapCount: Int,
     calibrationAvgDev: Int,
     currentLevelId: Int,
@@ -355,6 +382,7 @@ fun NavigationHost(
     onStartLevel: (bpm: Int) -> Unit,
     onStopRhythm: () -> Unit,
     onTap: () -> Unit,
+    onSoundChanged: (Boolean) -> Unit,
     onVibrationChanged: (Boolean) -> Unit,
     onStartCalibration: () -> Unit,
     onCalibrationTap: () -> Unit,
@@ -378,10 +406,10 @@ fun NavigationHost(
                 Screen.Learning -> LearningScreen(onBack = { onNavigate(Screen.MainMenu) })
                 Screen.Settings -> SettingsScreen(
                     vibrationEnabled = vibrationEnabled,
-                    soundEnabled = true,
+                    soundEnabled = soundEnabled,
                     calibrationOffset = calibrationOffset,
                     onVibrationChanged = onVibrationChanged,
-                    onSoundChanged = { enabled -> /* сохранение звука */ },
+                    onSoundChanged = onSoundChanged,
                     onStartCalibration = onStartCalibration,
                     onBack = { onNavigate(Screen.MainMenu) }
                 )
