@@ -44,6 +44,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+import com.example.rhythmtrainer.learning.LearningScreen
+
 class MainActivity : ComponentActivity() {
 
     companion object {
