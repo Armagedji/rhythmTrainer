@@ -25,8 +25,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -34,8 +34,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PaintingStyle.Companion.Stroke
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
@@ -45,6 +43,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 import com.example.rhythmtrainer.learning.LearningScreen
+import com.example.rhythmtrainer.ui.screens.LevelSelectScreen
+import com.example.rhythmtrainer.ranks.GameResultsStorage
 
 class MainActivity : ComponentActivity() {
 
@@ -63,7 +63,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Нативные функции
     private external fun nativeInit()
     private external fun startRhythm(bpm: Int)
     private external fun stopRhythm()
@@ -73,13 +72,10 @@ class MainActivity : ComponentActivity() {
     private external fun stopCalibration()
     private external fun getCalibrationOffset(): Int
     private external fun setCalibrationOffset(offsetMs: Int)
-    private external fun loadSong(bpm: Int, totalNotes: Int)
     private external fun getTotalNotes(): Int
-    private external fun setNotePositionCallback()
     private external fun setAllNotesProgressCallback()
 
-    // MutableState для UI
-    private val _score = mutableStateOf(0)
+    private val _score = mutableIntStateOf(0)
     private val _lastResult = mutableStateOf("")
     private val _vibrationEnabled = mutableStateOf(true)
     private val _calibrationOffset = mutableStateOf(getCalibrationOffset())
@@ -90,22 +86,18 @@ class MainActivity : ComponentActivity() {
     private val _noteColors = mutableStateOf<Map<Int, Color>>(emptyMap())
     private val _allProgresses = mutableStateOf(floatArrayOf())
 
-    // Состояния навигации и уровня (подняты в MainActivity)
     private var currentScreen by mutableStateOf<Screen>(Screen.MainMenu)
     private var currentLevelId by mutableStateOf(1)
     private var currentBpm by mutableStateOf(80)
 
-    // Состояния для диалога результатов
     private var showResultDialog by mutableStateOf(false)
     private var dialogScore by mutableStateOf(0)
     private var dialogHasNextLevel by mutableStateOf(false)
 
-    // Таймер для завершения уровня
     private var levelCompletionJob: Job? = null
 
+    private lateinit var gameResultsStorage: GameResultsStorage
 
-
-    // Callback'и из C++
     @Suppress("unused")
     fun updateScore(score: Int) {
         runOnUiThread {
@@ -135,7 +127,7 @@ class MainActivity : ComponentActivity() {
         runOnUiThread {
             Log.d(TAG, "updateResult: $result")
             _lastResult.value = result
-            updateNoteColorFromResult(result)   // добавлено
+            updateNoteColorFromResult(result)
             if (_vibrationEnabled.value && result != "Miss..." && result.isNotEmpty()) {
                 vibrateDevice()
             }
@@ -197,8 +189,8 @@ class MainActivity : ComponentActivity() {
         levelCompletionJob?.cancel()
         _score.value = 0
         _lastResult.value = ""
-        _allProgresses.value = floatArrayOf()  // очистка прогрессов
-        _noteColors.value = emptyMap()     // сброс цветов
+        _allProgresses.value = floatArrayOf()
+        _noteColors.value = emptyMap()
         startRhythm(bpm)
         val beatDurationMs = 60000L / bpm
         val durationMs = (notesCount - 1) * beatDurationMs
@@ -207,7 +199,6 @@ class MainActivity : ComponentActivity() {
             if (isRhythmPlaying()) {
                 stopRhythm()
                 dialogScore = _score.value
-                // Проверка, есть ли следующий уровень (всего 3 уровня)
                 dialogHasNextLevel = (currentLevelId < 3)
                 showResultDialog = true
             }
@@ -227,6 +218,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        gameResultsStorage = GameResultsStorage(this)
+
         vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val vibratorManager = getSystemService(VIBRATOR_MANAGER_SERVICE) as VibratorManager
             vibratorManager.defaultVibrator
@@ -239,9 +232,9 @@ class MainActivity : ComponentActivity() {
         setAllNotesProgressCallback()
 
         setContent {
+
             RhythmTrainerTheme {
                 Box {
-                    // Основная навигация
                     NavigationHost(
                         currentScreen = currentScreen,
                         score = _score.value,
@@ -281,19 +274,21 @@ class MainActivity : ComponentActivity() {
                         },
                         onGetTotalNotes = { getTotalNotes() },
                         allProgresses = _allProgresses.value,
-                        noteColors = _noteColors.value
+                        noteColors = _noteColors.value,
+                        gameResultsStorage = gameResultsStorage
                     )
 
-                    // Диалог результатов
                     if (showResultDialog) {
                         ResultDialog(
                             score = dialogScore,
                             hasNextLevel = dialogHasNextLevel,
                             onRepeat = {
+                                gameResultsStorage.setBestScore(currentLevelId, dialogScore)
                                 showResultDialog = false
                                 startLevel(currentBpm)
                             },
                             onNext = {
+                                gameResultsStorage.setBestScore(currentLevelId, dialogScore)
                                 showResultDialog = false
                                 currentLevelId++
                                 currentBpm = when (currentLevelId) {
@@ -305,10 +300,14 @@ class MainActivity : ComponentActivity() {
                                 startLevel(currentBpm)
                             },
                             onSelectLevel = {
+                                gameResultsStorage.setBestScore(currentLevelId, dialogScore)
                                 showResultDialog = false
                                 currentScreen = Screen.LevelSelect
                             },
-                            onDismiss = { showResultDialog = false }
+                            onDismiss = {
+                                gameResultsStorage.setBestScore(currentLevelId, dialogScore)
+                                showResultDialog = false
+                            }
                         )
                     }
                 }
@@ -351,6 +350,7 @@ fun NavigationHost(
     onGetTotalNotes: () -> Int,
     allProgresses: FloatArray,
     noteColors: Map<Int, Color>,
+    gameResultsStorage: GameResultsStorage
 ) {
     Scaffold { paddingValues ->
         Column(
@@ -537,36 +537,6 @@ fun CalibrationScreen(
 }
 
 @Composable
-fun LevelSelectScreen(onBack: () -> Unit, onLevelSelected: (levelId: Int, bpm: Int) -> Unit) {
-    val levels = listOf(
-        LevelInfo(1, "Уровень 1: Четверти", "BPM: 80", 80),
-        LevelInfo(2, "Уровень 2: Восьмые", "BPM: 100", 100),
-        LevelInfo(3, "Уровень 3: Паузы", "BPM: 120", 120)
-    )
-
-    Column(
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        levels.forEach { level ->
-            Button(
-                onClick = { onLevelSelected(level.id, level.bpm) },
-                modifier = Modifier.fillMaxWidth(0.8f)
-            ) {
-                Column {
-                    Text(level.name)
-                    Text(level.description, fontSize = 12.sp)
-                }
-            }
-        }
-        Button(onClick = onBack) {
-            Text("Назад")
-        }
-    }
-}
-
-@Composable
 fun GameScreenWithNotes(
     levelId: Int,
     bpm: Int,
@@ -587,18 +557,15 @@ fun GameScreenWithNotes(
             val widthPx = size.width
             val heightPx = size.height
 
-            // Фон (чёрный для контраста)
             drawRect(color = Color.Black, size = size)
 
-            // Параметры движения нот
-            val startX = widthPx + 200f   // за правым краем
-            val endX = -200f              // за левым краем
-            val hitLineX = widthPx / 2f   // центральная линия
+            val startX = widthPx + 200f
+            val endX = -200f
+            val hitLineX = widthPx / 2f
 
             for (i in 0 until totalNotes) {
                 val progress = if (i < allProgresses.size) allProgresses[i] else -1f
                 if (progress in 0f..1f) {
-                    // Линейная интерполяция координаты X
                     val x = startX + (endX - startX) * progress
                     val y = heightPx / 2 + (if (i % 2 == 0) -40f else 40f)
                     val noteColor = noteColors[i] ?: Color.White
@@ -617,7 +584,6 @@ fun GameScreenWithNotes(
                 }
             }
 
-            // Зелёная линия попадания
             drawLine(
                 color = Color.Green,
                 start = Offset(hitLineX, 0f),
@@ -626,7 +592,6 @@ fun GameScreenWithNotes(
             )
         }
 
-        // Интерфейс поверх Canvas (без изменений)
         Column(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.Top,
