@@ -10,6 +10,7 @@ static jobject g_javaObject = nullptr;
 static jmethodID g_updateScoreMethod = nullptr;
 static jmethodID g_updateResultMethod = nullptr;
 static jmethodID g_updateCalibrationMethod = nullptr;
+static jmethodID g_updateAllNotesProgressMethod = nullptr;
 
 extern "C" {
 
@@ -30,10 +31,12 @@ Java_com_example_rhythmtrainer_MainActivity_nativeInit(JNIEnv* env, jobject thiz
     g_javaObject = env->NewGlobalRef(thiz);
 
     // Получаем методы для callback'ов
+
     jclass clazz = env->GetObjectClass(g_javaObject);
     g_updateScoreMethod = env->GetMethodID(clazz, "updateScore", "(I)V");
     g_updateResultMethod = env->GetMethodID(clazz, "updateResult", "(Ljava/lang/String;)V");
     g_updateCalibrationMethod = env->GetMethodID(clazz, "updateCalibration", "(II)V");
+    g_updateAllNotesProgressMethod = env->GetMethodID(clazz, "updateAllNotesProgress", "([F)V");
 
     // Устанавливаем callback для игровых очков
     RhythmEngine::getInstance()->setScoreUpdateCallback([](int score, const char* result) {
@@ -177,6 +180,19 @@ Java_com_example_rhythmtrainer_MainActivity_setNotePositionCallback(JNIEnv* env,
         }
 
         if (needDetach) vm->DetachCurrentThread();
+    });
+}
+
+
+
+// В nativeInit получите метод:
+
+
+// И функция:
+JNIEXPORT void JNICALL
+Java_com_example_rhythmtrainer_MainActivity_setAllNotesProgressCallback(JNIEnv* env, jobject /* this */) {
+    RhythmEngine::getInstance()->setAllNotesProgressCallback([=](const std::vector<float>& progresses) {
+        // ... (как в предыдущих примерах, с вызовом updateAllNotesProgress)
     });
 }
 

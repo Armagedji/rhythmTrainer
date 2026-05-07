@@ -26,6 +26,10 @@ public:
     void setScoreUpdateCallback(std::function<void(int, const char*)> callback);
     void setNotePositionCallback(std::function<void(int index, float progress)> callback);
 
+    void setAllNotesProgressCallback(std::function<void(const std::vector<float>&)> callback);
+    std::vector<float> mAllProgresses;
+    std::function<void(const std::vector<float>&)> mAllNotesProgressCallback;
+
     // Калибровка
     void startCalibration(int bpm = 120);
     void stopCalibration();
@@ -70,6 +74,7 @@ private:
     std::atomic<long long> mGameStartTime{0};
     std::function<void(int, const char*)> mScoreCallback;
     std::function<void(int, float)> mNotePositionCallback;
+
 
     // Таймлайн
     std::vector<long long> mTimeline;  // идеальные моменты нажатий в мс от начала

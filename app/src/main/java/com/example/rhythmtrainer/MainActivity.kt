@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -33,6 +34,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PaintingStyle.Companion.Stroke
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
@@ -71,6 +74,7 @@ class MainActivity : ComponentActivity() {
     private external fun loadSong(bpm: Int, totalNotes: Int)
     private external fun getTotalNotes(): Int
     private external fun setNotePositionCallback()
+    private external fun setAllNotesProgressCallback()
 
     // MutableState для UI
     private val _score = mutableStateOf(0)
@@ -81,6 +85,8 @@ class MainActivity : ComponentActivity() {
     private val _calibrationAvgDev = mutableStateOf(0)
     private val _isCalibrating = mutableStateOf(false)
     private val _notePositions = mutableStateOf<Map<Int, Float>>(emptyMap())
+    private val _noteColors = mutableStateOf<Map<Int, Color>>(emptyMap())
+    private val _allProgresses = mutableStateOf(floatArrayOf())
 
     // Состояния навигации и уровня (подняты в MainActivity)
     private var currentScreen by mutableStateOf<Screen>(Screen.MainMenu)
@@ -94,6 +100,8 @@ class MainActivity : ComponentActivity() {
 
     // Таймер для завершения уровня
     private var levelCompletionJob: Job? = null
+
+
 
     // Callback'и из C++
     @Suppress("unused")
@@ -114,10 +122,18 @@ class MainActivity : ComponentActivity() {
     }
 
     @Suppress("unused")
+    fun updateAllNotesProgress(progress: FloatArray) {
+        runOnUiThread {
+            _allProgresses.value = progress
+        }
+    }
+
+    @Suppress("unused")
     fun updateResult(result: String) {
         runOnUiThread {
             Log.d(TAG, "updateResult: $result")
             _lastResult.value = result
+            updateNoteColorFromResult(result)   // добавлено
             if (_vibrationEnabled.value && result != "Miss..." && result.isNotEmpty()) {
                 vibrateDevice()
             }
@@ -142,6 +158,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun updateNoteColorFromResult(result: String) {
+        // Находим ближайшую ноту с прогрессом > 0.4 и < 0.6 (в районе линии)
+        val currentPositions = _notePositions.value
+        val targetIndex = currentPositions.entries
+            .filter { it.value in 0.4f..0.6f }
+            .minByOrNull { kotlin.math.abs(it.value - 0.5f) }
+            ?.key
+        if (targetIndex != null) {
+            val color = when {
+                result.contains("Perfect") -> Color.Green
+                result.contains("Good") -> Color.Yellow
+                else -> Color.Red
+            }
+            _noteColors.value = _noteColors.value.toMutableMap().apply {
+                put(targetIndex, color)
+            }
+        }
+    }
+
     private fun vibrateDevice() {
         val vibratorInstance = vibrator ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -156,6 +191,7 @@ class MainActivity : ComponentActivity() {
         levelCompletionJob?.cancel()
         _score.value = 0
         _lastResult.value = ""
+        _noteColors.value = emptyMap()   // сброс цветов
         startRhythm(bpm)
         val beatDurationMs = 60000L / bpm
         val durationMs = (notesCount - 1) * beatDurationMs
@@ -193,6 +229,7 @@ class MainActivity : ComponentActivity() {
         }
 
         nativeInit()
+        setAllNotesProgressCallback()
 
         setContent {
             RhythmTrainerTheme {
@@ -236,8 +273,7 @@ class MainActivity : ComponentActivity() {
                             currentScreen = Screen.Settings
                         },
                         onGetTotalNotes = { getTotalNotes() },
-                        notePositions = _notePositions.value,
-                        onSetNotePositionCallback = { setNotePositionCallback() }
+                        allProgresses = _allProgresses.value,
                     )
 
                     // Диалог результатов
@@ -305,8 +341,7 @@ fun NavigationHost(
     onFinishCalibration: () -> Unit,
     onCancelCalibration: () -> Unit,
     onGetTotalNotes: () -> Int,
-    notePositions: Map<Int, Float>,
-    onSetNotePositionCallback: () -> Unit,
+    allProgresses: FloatArray,
 ) {
     Scaffold { paddingValues ->
         Column(
@@ -351,8 +386,7 @@ fun NavigationHost(
                         },
                         onStartLevel = { onStartLevel(currentBpm) },
                         onTap = onTap,
-                        notePositions = notePositions,
-                        onSetNotePositionCallback = onSetNotePositionCallback
+                        allProgresses = allProgresses,
                     )
                 }
             }
@@ -529,64 +563,68 @@ fun GameScreenWithNotes(
     score: Int,
     lastResult: String,
     totalNotes: Int,
+    allProgresses: FloatArray,
     onBack: () -> Unit,
     onStartLevel: () -> Unit,
-    onTap: () -> Unit,
-    notePositions: Map<Int, Float>,
-    onSetNotePositionCallback: () -> Unit
+    onTap: () -> Unit
 ) {
-    LaunchedEffect(Unit) {
-        onSetNotePositionCallback()
-    }
+    // Убираем вызов onSetNotePositionCallback – он теперь не нужен
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        // Canvas для отрисовки нот
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val screenWidth = maxWidth
+        val screenHeight = maxHeight
+
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val noteWidth = 40f
-            val startX = 3000f // правая сторона
-            val endX = 600f                        // левая сторона (линия попадания)
+            val widthPx = size.width
+            val heightPx = size.height
+
+            drawRect(color = Color.Black, size = size) // фон
+
+            // Параметры пути ноты
+            val startX = widthPx + 200f      // за правым краем
+            val endX = -200f                 // за левым краем
+            val hitLineX = widthPx / 2f      // линия попадания – центр
 
             for (i in 0 until totalNotes) {
-                val progress = notePositions[i] ?: -1f
+                val progress = if (i < allProgresses.size) allProgresses[i] else -1f
                 if (progress in 0f..1f) {
-                    val x = startX - (startX - endX) * progress
-                    val y = size.height / 2 + (if (i % 2 == 0) -30f else 30f)
+                    // Линейная интерполяция от startX до endX
+                    val x = startX + (endX - startX) * progress
+                    val y = heightPx / 2 + (if (i % 2 == 0) -40f else 40f)
+                    val noteColor = Color.White
+//                    val noteColor = noteColors[i] ?: Color.White
 
-                    // Рисуем ноту (круг)
-                    drawCircle(
-                        color = if (progress > 0.9f) Color.Red else Color.White,
-                        radius = 40f,
-                        center = Offset(x, y)
+                    drawOval(
+                        color = noteColor,
+                        topLeft = Offset(x - 30f, y - 20f),
+                        size = androidx.compose.ui.geometry.Size(60f, 40f)
                     )
-                    // Рисуем стебель
                     drawLine(
-                        color = Color.White,
-                        start = Offset(x, y),
-                        end = Offset(x, y - 60f),
-                        strokeWidth = 3f
+                        color = noteColor,
+                        start = Offset(x + 30f, y - 20f),
+                        end = Offset(x + 30f, y + 20f),
+                        strokeWidth = 4f
                     )
                 }
             }
 
-            // Линия попадания
             drawLine(
                 color = Color.Green,
-                start = Offset(endX, 0f),
-                end = Offset(endX, size.height),
-                strokeWidth = 5f
+                start = Offset(hitLineX, 0f),
+                end = Offset(hitLineX, heightPx),
+                strokeWidth = 4f
             )
         }
 
-        // Интерфейс (счёт, кнопки) поверх Canvas
+        // Интерфейс поверх Canvas (без изменений)
         Column(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Панель счёта
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                color = Color.DarkGray
+                color = Color.DarkGray.copy(alpha = 0.8f)
             ) {
                 Row(
                     modifier = Modifier.padding(16.dp).fillMaxWidth(),
@@ -600,7 +638,6 @@ fun GameScreenWithNotes(
 
             Spacer(modifier = Modifier.weight(1f))
 
-            // Кнопки управления
             Column(
                 modifier = Modifier.padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
