@@ -51,6 +51,9 @@ public:
     int getTotalNotes() const { return mTotalNotes; }
     void loadSong(int bpm, int totalNotes);
 
+    void setLevelCompleteCallback(std::function<void()> callback);
+    int getNotesPlayed() const { return mNotesPlayed; }
+
 
 
 private:
@@ -104,6 +107,9 @@ private:
 
     std::atomic<bool> mPaused{false};
     long long mPauseStartTime = 0;
+
+    std::function<void()> mLevelCompleteCallback;
+    int mNotesPlayed = 0;
 
 };
 

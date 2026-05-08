@@ -98,6 +98,7 @@ void RhythmEngine::start(int bpm) {
 
     mPaused = false;
     mPauseStartTime = 0;
+    mNotesPlayed = 0;
 
     if (mIsPlaying) {
         restartStream();
@@ -248,11 +249,22 @@ oboe::DataCallbackResult RhythmEngine::onAudioReady(
     for (int i = 0; i < numFrames; ++i) {
         bool isBeatStart = (mFrameCounter % beatDurationFrames == 0);
 
-        if (isBeatStart && mIsPlaying) {
+        if (isBeatStart && mIsPlaying && !mPaused) {
             mClickPosition = 0;
+            mNotesPlayed++;
+
             // Обновляем позицию ноты для UI
             long long elapsed = getCurrentTimeMs() - mGameStartTime;
             updateNotePosition(elapsed);
+
+            // Проверяем, все ли ноты отыграны
+            if (mNotesPlayed >= mTotalNotes) {
+                LOGD("All notes played! Stopping rhythm.");
+                // Вызываем колбэк завершения уровня
+                if (mLevelCompleteCallback) {
+                    mLevelCompleteCallback();
+                }
+            }
         }
 
         float sample = 0.0f;
@@ -410,4 +422,8 @@ void RhythmEngine::resume() {
 
     LOGD("Rhythm resumed, shifted gameStartTime by %lld ms, new gameStartTime=%lld",
          pauseDuration, mGameStartTime.load());
+}
+
+void RhythmEngine::setLevelCompleteCallback(std::function<void()> callback) {
+    mLevelCompleteCallback = callback;
 }

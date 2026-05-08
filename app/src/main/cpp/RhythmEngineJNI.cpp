@@ -10,6 +10,7 @@ static jmethodID g_updateScoreMethod = nullptr;
 static jmethodID g_updateResultMethod = nullptr;
 static jmethodID g_updateCalibrationMethod = nullptr;
 static jmethodID g_updateAllNotesProgressMethod = nullptr;
+static jmethodID g_levelCompleteMethod = nullptr;
 
 extern "C" {
 
@@ -90,6 +91,27 @@ Java_com_example_rhythmtrainer_MainActivity_nativeInit(JNIEnv* env, jobject thiz
             vm->DetachCurrentThread();
         }
     });
+
+    g_levelCompleteMethod = env->GetMethodID(
+            clazz, "onLevelComplete", "()V"
+    );
+
+    RhythmEngine::getInstance()->setLevelCompleteCallback([]() {
+        JNIEnv* env = nullptr;
+        JavaVM* vm = RhythmEngine::getInstance()->getJavaVM();
+        if (vm == nullptr) return;
+
+        int attached = vm->GetEnv((void**)&env, JNI_VERSION_1_6);
+        bool needDetach = (attached == JNI_EDETACHED);
+        if (needDetach) vm->AttachCurrentThread(&env, nullptr);
+
+        if (env != nullptr && g_javaObject != nullptr && g_levelCompleteMethod != nullptr) {
+            env->CallVoidMethod(g_javaObject, g_levelCompleteMethod);
+        }
+
+        if (needDetach) vm->DetachCurrentThread();
+    });
+
 
     LOGD("nativeInit completed successfully");
 }

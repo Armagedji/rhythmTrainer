@@ -12,6 +12,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -39,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -117,6 +119,7 @@ class MainActivity : ComponentActivity() {
 
     private var levelStartTime: Long = 0L
     private var totalLevelDuration: Long = 0L
+    private var remainingTimeOnPause: Long = 0L
 
     private lateinit var gameResultsStorage: GameResultsStorage
 
@@ -125,6 +128,18 @@ class MainActivity : ComponentActivity() {
         runOnUiThread {
             Log.d(TAG, "updateScore: $score")
             _score.value = score
+        }
+    }
+
+    @Suppress("unused")
+    fun onLevelComplete() {
+        runOnUiThread {
+            Log.d(TAG, "onLevelComplete called")
+            stopRhythm()
+            _isPaused.value = false
+            dialogScore = _score.value
+            dialogHasNextLevel = (currentLevelId < 3)
+            showResultDialog = true
         }
     }
 
@@ -175,6 +190,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun stopLevel() {
+        if (isRhythmPlaying()) stopRhythm()
+        _isPaused.value = false
+    }
+
     private fun updateNoteColorFromResult(result: String) {
         val progresses = _allProgresses.value
         var targetIndex = -1
@@ -201,29 +221,11 @@ class MainActivity : ComponentActivity() {
 
     fun togglePause() {
         if (_isPaused.value) {
-            // Возобновляем
             resumeRhythm()
             _isPaused.value = false
-
-            val elapsed = SystemClock.elapsedRealtime() - levelStartTime
-            val remaining = totalLevelDuration - elapsed
-            if (remaining > 0) {
-                levelCompletionJob?.cancel()
-                levelCompletionJob = lifecycleScope.launch {
-                    delay(remaining)
-                    if (isRhythmPlaying()) {
-                        stopRhythm()
-                        dialogScore = _score.value
-                        dialogHasNextLevel = (currentLevelId < 3)
-                        showResultDialog = true
-                    }
-                }
-            }
         } else {
-            // Ставим на паузу
             pauseRhythm()
             _isPaused.value = true
-            levelCompletionJob?.cancel()
         }
     }
 
@@ -250,34 +252,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun startLevel(bpm: Int, notesCount: Int = 32) {
-        levelCompletionJob?.cancel()
+    private fun startLevel(bpm: Int) {
         _score.value = 0
         _lastResult.value = ""
         _allProgresses.value = floatArrayOf()
         _noteColors.value = emptyMap()
         _isPaused.value = false
-
-        levelStartTime = System.currentTimeMillis()
-        val beatDurationMs = 60000L / bpm
-        totalLevelDuration = (notesCount - 1) * beatDurationMs + 300
-
         startRhythm(bpm)
-        levelCompletionJob = lifecycleScope.launch {
-            delay(totalLevelDuration)
-            if (isRhythmPlaying()) {
-                stopRhythm()
-                dialogScore = _score.value
-                dialogHasNextLevel = (currentLevelId < 3)
-                showResultDialog = true
-            }
-        }
     }
 
-    private fun stopLevel() {
-        levelCompletionJob?.cancel()
-        if (isRhythmPlaying()) stopRhythm()
-    }
 
     private fun finishCalibration() {
         Log.d(TAG, "finishCalibration called")
@@ -575,15 +558,33 @@ fun GameScreenWithNotes(
         val screenWidth = maxWidth
         val screenHeight = maxHeight
 
+        // Игровое поле с нотами
         Canvas(modifier = Modifier.fillMaxSize()) {
             val widthPx = size.width
             val heightPx = size.height
 
-            drawRect(color = Color.Black, size = size)
+            // Градиентный фон вместо чистого чёрного
+            drawRect(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF0D0D1A),
+                        Color(0xFF1A1A2E),
+                        Color(0xFF0D0D1A)
+                    )
+                ),
+                size = size
+            )
 
             val startX = widthPx + 200f
             val endX = -200f
             val hitLineX = widthPx / 2f
+
+            // Полупрозрачная центральная зона
+            drawRect(
+                color = Color.White.copy(alpha = 0.03f),
+                topLeft = Offset(hitLineX - 50f, 0f),
+                size = androidx.compose.ui.geometry.Size(100f, heightPx)
+            )
 
             for (i in 0 until totalNotes) {
                 val progress = if (i < allProgresses.size) allProgresses[i] else -1f
@@ -592,11 +593,19 @@ fun GameScreenWithNotes(
                     val y = heightPx / 2 + (if (i % 2 == 0) -40f else 40f)
                     val noteColor = noteColors[i] ?: Color.White
 
+                    // Свечение вокруг ноты
+                    drawOval(
+                        color = noteColor.copy(alpha = 0.3f),
+                        topLeft = Offset(x - 35f, y - 25f),
+                        size = androidx.compose.ui.geometry.Size(70f, 50f)
+                    )
+                    // Сама нота
                     drawOval(
                         color = noteColor,
                         topLeft = Offset(x - 30f, y - 20f),
                         size = androidx.compose.ui.geometry.Size(60f, 40f)
                     )
+                    // Палочка ноты
                     drawLine(
                         color = noteColor,
                         start = Offset(x + 27f, y - 90f),
@@ -606,65 +615,173 @@ fun GameScreenWithNotes(
                 }
             }
 
+            // Линия попадания с градиентом
             drawLine(
-                color = Color.Green,
-                start = Offset(hitLineX, 0f),
-                end = Offset(hitLineX, heightPx),
-                strokeWidth = 4f
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color.Green.copy(alpha = 0f),
+                        Color.Green,
+                        Color.Green.copy(alpha = 0f)
+                    )
+                ),
+                start = Offset(hitLineX, heightPx * 0.1f),
+                end = Offset(hitLineX, heightPx * 0.9f),
+                strokeWidth = 3f
             )
         }
 
+        // Интерфейс поверх игры
         Column(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Верхняя панель с информацией
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                color = Color.DarkGray.copy(alpha = 0.8f)
+                color = Color(0xFF1A1A2E).copy(alpha = 0.95f),
+                shadowElevation = 8.dp
             ) {
-                Row(
-                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Счёт: $score", color = Color.White, fontSize = 24.sp)
-                    Text("BPM: $bpm", color = Color.White, fontSize = 24.sp)
-                    Text("Результат: $lastResult", color = Color.White, fontSize = 20.sp)
+                Column {
+                    // Строка с кнопкой назад и заголовком
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Стрелка назад
+                        Text(
+                            text = "←",
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            modifier = Modifier
+                                .clickable { onBack() }
+                                .padding(horizontal = 12.dp, vertical = 4.dp)
+                        )
+                        Text(
+                            text = "Уровень $levelId",
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.weight(1f))
+                        Text(
+                            text = "BPM $bpm",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 14.sp
+                        )
+                    }
+
+                    // Строка со статистикой
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.Black.copy(alpha = 0.3f))
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        StatItem("Счёт", "$score", Color(0xFF4CAF50))
+                        StatItem("Результат", lastResult.ifEmpty { "—" }, Color(0xFFFFC107))
+                    }
                 }
             }
 
             Spacer(modifier = Modifier.weight(1f))
 
-            Column(
-                modifier = Modifier.padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+            // Кнопки управления
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color(0xFF1A1A2E).copy(alpha = 0.95f),
+                shadowElevation = 8.dp
             ) {
-                Button(
-                    onClick = onStartLevel,
-                    modifier = Modifier.fillMaxWidth().height(80.dp)
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text("Запустить ритм", fontSize = 20.sp)
-                }
-                Button(
-                    onClick = onTap,
-                    modifier = Modifier.fillMaxWidth().height(80.dp).padding(top = 8.dp)
-                ) {
-                    Text("Нажми в ритм!", fontSize = 20.sp)
-                }
-                Button(
-                    onClick = onTogglePause,
-                    modifier = Modifier.fillMaxWidth().height(60.dp)
-                ) {
-                    Text(if (isPaused) "▶ Продолжить" else "⏸ Пауза", fontSize = 18.sp)
-                }
-                Button(
-                    onClick = onBack,
-                    modifier = Modifier.padding(top = 16.dp)
-                ) {
-                    Text("Выйти")
+                    // Основные кнопки в ряд
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        GameButton(
+                            text = "▶ Запустить",
+                            onClick = onStartLevel,
+                            modifier = Modifier.weight(1f),
+                            color = Color(0xFF7C4DFF)
+                        )
+                        GameButton(
+                            text = if (isPaused) "▶ Играть" else "⏸ Пауза",
+                            onClick = onTogglePause,
+                            modifier = Modifier.weight(1f),
+                            color = if (isPaused) Color(0xFF4CAF50) else Color(0xFFFF9800)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Кнопка тапа (большая)
+                    Button(
+                        onClick = onTap,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(80.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFE91E63)
+                        )
+                    ) {
+                        Text(
+                            "👆 Нажми в ритм!",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+// Вспомогательные компоненты
+@Composable
+private fun StatItem(label: String, value: String, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = label,
+            color = Color.White.copy(alpha = 0.6f),
+            fontSize = 12.sp
+        )
+        Text(
+            text = value,
+            color = color,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+private fun GameButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    color: Color
+) {
+    Button(
+        onClick = onClick,
+        modifier = modifier.height(56.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = color)
+    ) {
+        Text(
+            text = text,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White
+        )
     }
 }
 
