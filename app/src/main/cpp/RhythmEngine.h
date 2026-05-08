@@ -111,6 +111,8 @@ private:
     std::function<void()> mLevelCompleteCallback;
     int mNotesPlayed = 0;
 
+    bool mIsCalibrating = false;
+    std::function<void()> mSavedLevelCompleteCallback;
 
 };
 

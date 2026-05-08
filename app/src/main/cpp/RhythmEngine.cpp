@@ -99,6 +99,7 @@ void RhythmEngine::start(int bpm) {
     mPaused = false;
     mPauseStartTime = 0;
     mNotesPlayed = 0;
+    mIsCalibrating = false;
 
     if (mIsPlaying) {
         restartStream();
@@ -263,9 +264,8 @@ oboe::DataCallbackResult RhythmEngine::onAudioReady(
             updateNotePosition(elapsed);
 
             // Проверяем, все ли ноты отыграны
-            if (mNotesPlayed >= mTotalNotes) {
+            if (mNotesPlayed >= mTotalNotes && !mIsCalibrating) {  // ← не завершаем при калибровке
                 LOGD("All notes played! Stopping rhythm.");
-                // Вызываем колбэк завершения уровня
                 if (mLevelCompleteCallback) {
                     mLevelCompleteCallback();
                 }
@@ -306,6 +306,11 @@ void RhythmEngine::startCalibration(int bpm) {
     mCalibrationDeviations.clear();
     mCalibrationTapCount = 0;
     mCalibrationAverageDeviation = 0;
+    mIsCalibrating = true;
+
+    mSavedLevelCompleteCallback = mLevelCompleteCallback;
+    mLevelCompleteCallback = nullptr;
+
     setBpm(bpm);
 
     if (mIsPlaying) {
@@ -314,12 +319,19 @@ void RhythmEngine::startCalibration(int bpm) {
         start(bpm);
     }
 
+
     mCalibrationStartTime = getCurrentTimeMs();
     LOGD("Calibration started at %lld", mCalibrationStartTime);
 }
 
 void RhythmEngine::stopCalibration() {
     LOGD("stopCalibration() called");
+    mIsCalibrating = false;
+
+
+    mLevelCompleteCallback = mSavedLevelCompleteCallback;
+    mSavedLevelCompleteCallback = nullptr;
+
     stop();
 
     if (!mCalibrationDeviations.empty()) {
