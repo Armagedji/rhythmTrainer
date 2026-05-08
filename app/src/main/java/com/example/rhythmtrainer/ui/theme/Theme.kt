@@ -1,75 +1,120 @@
 package com.example.rhythmtrainer.ui.theme
 
-import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+
+val Purple700 = Color(0xFF6A1B9A)
+val Purple500 = Color(0xFF9C27B0)
+val Purple300 = Color(0xFFBA68C8)
+val Purple100 = Color(0xFFE1BEE7)
+val DeepPurple = Color(0xFF311B92)
+val Amber500 = Color(0xFFFFC107)
+val Amber700 = Color(0xFFFFA000)
+val DarkSurface = Color(0xFF1E1E2E)
+val DarkBackground = Color(0xFF121218)
+val LightBackground = Color(0xFFF8F5FF)
+val LightSurface = Color(0xFFFFFFFF)
+val TextOnDark = Color(0xFFE8E8F0)
+val TextOnLight = Color(0xFF1A1A2E)
+val AccentGradientStart = Color(0xFF7C4DFF)
+val AccentGradientEnd = Color(0xFF448AFF)
 
 private val LightColorScheme = lightColorScheme(
-    primary = Color(0xFF6200EE),
+    primary = Purple700,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFBB86FC),
-    onPrimaryContainer = Color(0xFF3700B3),
-    secondary = Color(0xFF03DAC5),
+    primaryContainer = Purple100,
+    onPrimaryContainer = DeepPurple,
+    secondary = Amber500,
     onSecondary = Color.Black,
-    secondaryContainer = Color(0xFF018786),
-    onSecondaryContainer = Color(0xFF03DAC5),
-    background = Color.White,
-    onBackground = Color.Black,
-    surface = Color.White,
-    onSurface = Color.Black,
+    secondaryContainer = Amber700,
+    onSecondaryContainer = Color.White,
+    background = LightBackground,
+    onBackground = TextOnLight,
+    surface = LightSurface,
+    onSurface = TextOnLight,
+    surfaceVariant = Color(0xFFEDE7F6),
+    onSurfaceVariant = Color(0xFF49454E),
     error = Color(0xFFB00020),
     onError = Color.White,
-    surfaceVariant = Color(0xFFF5F5F5),
-    onSurfaceVariant = Color(0xFF49454E),
 )
 
-// Стандартные цвета для тёмной темы
 private val DarkColorScheme = darkColorScheme(
-    primary = Color(0xFFBB86FC),
+    primary = Purple300,
     onPrimary = Color.Black,
-    primaryContainer = Color(0xFF6200EE),
-    onPrimaryContainer = Color(0xFF3700B3),
-    secondary = Color(0xFF03DAC5),
+    primaryContainer = Purple700,
+    onPrimaryContainer = Purple100,
+    secondary = Amber500,
     onSecondary = Color.Black,
-    secondaryContainer = Color(0xFF018786),
-    onSecondaryContainer = Color(0xFF03DAC5),
-    background = Color(0xFF121212),
-    onBackground = Color.White,
-    surface = Color(0xFF121212),
-    onSurface = Color.White,
+    secondaryContainer = Amber700,
+    onSecondaryContainer = Color.White,
+    background = DarkBackground,
+    onBackground = TextOnDark,
+    surface = DarkSurface,
+    onSurface = TextOnDark,
+    surfaceVariant = Color(0xFF2D2D3F),
+    onSurfaceVariant = Color(0xFFCAC4D0),
     error = Color(0xFFCF6679),
     onError = Color.Black,
-    surfaceVariant = Color(0xFF49454E),
-    onSurfaceVariant = Color(0xFFCAC4D0),
 )
 
 @Composable
 fun RhythmTrainerTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
-      dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-        val context = LocalContext.current
-        if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-      }
-      darkTheme -> DarkColorScheme
-      else -> LightColorScheme
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            val context = LocalContext.current
+            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+        darkTheme -> DarkColorScheme
+        else -> LightColorScheme
     }
 
     MaterialTheme(
-      colorScheme = colorScheme,
-      typography = Typography,
-      content = content
+        colorScheme = colorScheme,
+        typography = AppTypography,
+        content = content
     )
 }
+
+val AppTypography = Typography(
+    headlineLarge = TextStyle(
+        fontSize = 28.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 0.sp
+    ),
+    headlineMedium = TextStyle(
+        fontSize = 24.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 0.sp
+    ),
+    titleLarge = TextStyle(
+        fontSize = 20.sp,
+        fontWeight = FontWeight.Medium,
+        letterSpacing = 0.sp
+    ),
+    bodyLarge = TextStyle(
+        fontSize = 16.sp,
+        fontWeight = FontWeight.Normal,
+        letterSpacing = 0.5.sp
+    ),
+    bodyMedium = TextStyle(
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Normal,
+        letterSpacing = 0.25.sp
+    ),
+    labelLarge = TextStyle(
+        fontSize = 16.sp,
+        fontWeight = FontWeight.Medium,
+        letterSpacing = 1.sp
+    ),
+)

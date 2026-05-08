@@ -11,6 +11,7 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -21,8 +22,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -36,6 +40,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
@@ -50,6 +56,7 @@ import com.example.rhythmtrainer.ranks.GameResultsStorage
 import com.example.rhythmtrainer.ui.screens.SettingsScreen
 import com.example.rhythmtrainer.ui.screens.CalibrationScreen
 import com.example.rhythmtrainer.settings.SettingsStorage
+import com.example.rhythmtrainer.ui.components.AppTopBar
 
 class MainActivity : ComponentActivity() {
 
@@ -497,17 +504,54 @@ fun NavigationHost(
 @Composable
 fun MainMenuScreen(onNavigate: (Screen) -> Unit) {
     Column(
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
     ) {
-        Button(onClick = { onNavigate(Screen.LevelSelect) }) {
-            Text("Уровни", fontSize = 20.sp)
-        }
-        Button(onClick = { onNavigate(Screen.Learning) }) {
-            Text("Обучение", fontSize = 20.sp)
-        }
-        Button(onClick = { onNavigate(Screen.Settings) }) {
-            Text("Настройки", fontSize = 20.sp)
+        AppTopBar(title = "Главное меню")
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Название приложения
+            Text(
+                text = "Rhythm Trainer",
+                fontSize = 36.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Приложение для развития чувства ритма",
+                fontSize = 16.sp,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(48.dp))
+
+            // Кнопки
+            MenuButton(
+                text = "🎯 Уровни",
+                onClick = { onNavigate(Screen.LevelSelect) }
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            MenuButton(
+                text = "📚 Обучение",
+                onClick = { onNavigate(Screen.Learning) }
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            MenuButton(
+                text = "⚙️ Настройки",
+                onClick = { onNavigate(Screen.Settings) }
+            )
         }
     }
 }
@@ -667,5 +711,24 @@ fun ResultDialog(
     )
 }
 
+@Composable
+private fun MenuButton(text: String, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(64.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.primary
+        )
+    ) {
+        Text(
+            text = text,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
 
 data class LevelInfo(val id: Int, val name: String, val description: String, val bpm: Int)
