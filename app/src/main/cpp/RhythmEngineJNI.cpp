@@ -81,14 +81,12 @@ Java_com_example_rhythmtrainer_MainActivity_nativeInit(JNIEnv* env, jobject thiz
 
         if (env != nullptr && g_javaObject != nullptr) {
             if (finished) {
-                // Вызываем onCalibrationComplete
                 jclass clazz = env->GetObjectClass(g_javaObject);
                 jmethodID method = env->GetMethodID(clazz, "onCalibrationComplete", "(II)V");
                 if (method != nullptr) {
                     env->CallVoidMethod(g_javaObject, method, tapCount, avgDeviation);
                 }
             } else {
-                // Вызываем updateCalibration
                 if (g_updateCalibrationMethod != nullptr) {
                     env->CallVoidMethod(g_javaObject, g_updateCalibrationMethod, tapCount, avgDeviation);
                 }

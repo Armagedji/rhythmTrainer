@@ -565,12 +565,10 @@ fun GameScreenWithNotes(
         val screenWidth = maxWidth
         val screenHeight = maxHeight
 
-        // Игровое поле с нотами
         Canvas(modifier = Modifier.fillMaxSize()) {
             val widthPx = size.width
             val heightPx = size.height
 
-            // Градиентный фон вместо чистого чёрного
             drawRect(
                 brush = Brush.verticalGradient(
                     colors = listOf(
@@ -586,7 +584,6 @@ fun GameScreenWithNotes(
             val endX = -200f
             val hitLineX = widthPx / 2f
 
-            // Полупрозрачная центральная зона
             drawRect(
                 color = Color.White.copy(alpha = 0.03f),
                 topLeft = Offset(hitLineX - 50f, 0f),
@@ -600,19 +597,16 @@ fun GameScreenWithNotes(
                     val y = heightPx / 2 + (if (i % 2 == 0) -40f else 40f)
                     val noteColor = noteColors[i] ?: Color.White
 
-                    // Свечение вокруг ноты
                     drawOval(
                         color = noteColor.copy(alpha = 0.3f),
                         topLeft = Offset(x - 35f, y - 25f),
                         size = androidx.compose.ui.geometry.Size(70f, 50f)
                     )
-                    // Сама нота
                     drawOval(
                         color = noteColor,
                         topLeft = Offset(x - 30f, y - 20f),
                         size = androidx.compose.ui.geometry.Size(60f, 40f)
                     )
-                    // Палочка ноты
                     drawLine(
                         color = noteColor,
                         start = Offset(x + 27f, y - 90f),
@@ -622,7 +616,6 @@ fun GameScreenWithNotes(
                 }
             }
 
-            // Линия попадания с градиентом
             drawLine(
                 brush = Brush.verticalGradient(
                     colors = listOf(
@@ -637,27 +630,23 @@ fun GameScreenWithNotes(
             )
         }
 
-        // Интерфейс поверх игры
         Column(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Верхняя панель с информацией
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 color = Color(0xFF1A1A2E).copy(alpha = 0.95f),
                 shadowElevation = 8.dp
             ) {
                 Column {
-                    // Строка с кнопкой назад и заголовком
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 4.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Стрелка назад
                         Text(
                             text = "←",
                             fontSize = 24.sp,
@@ -681,7 +670,6 @@ fun GameScreenWithNotes(
                         )
                     }
 
-                    // Строка со статистикой
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -697,7 +685,6 @@ fun GameScreenWithNotes(
 
             Spacer(modifier = Modifier.weight(1f))
 
-            // Кнопки управления
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 color = Color(0xFF1A1A2E).copy(alpha = 0.95f),
@@ -707,7 +694,6 @@ fun GameScreenWithNotes(
                     modifier = Modifier.padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Основные кнопки в ряд
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -728,7 +714,6 @@ fun GameScreenWithNotes(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Кнопка тапа (большая)
                     Button(
                         onClick = onTap,
                         modifier = Modifier
@@ -752,7 +737,6 @@ fun GameScreenWithNotes(
     }
 }
 
-// Вспомогательные компоненты
 @Composable
 private fun StatItem(label: String, value: String, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
