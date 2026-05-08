@@ -97,7 +97,6 @@ void RhythmEngine::start(int bpm) {
     mCurrentNoteIndex = 0;
 
     mPaused = false;
-    mPausedDurationMs = 0;
     mPauseStartTime = 0;
 
     if (mIsPlaying) {
@@ -142,7 +141,6 @@ void RhythmEngine::stop() {
     mNeedsRestart = false;
 
     mPaused = false;
-    mPausedDurationMs = 0;
 
     if (mStream) {
         mStream->stop();
@@ -362,14 +360,12 @@ void RhythmEngine::loadSong(int bpm, int totalNotes) {
 void RhythmEngine::updateNotePosition(long long elapsedMs) {
     if (!mIsPlaying || mPaused) return;
 
-    long long adjustedElapsed = elapsedMs - mPausedDurationMs;
-
     const long long LEAD_TIME_MS = 2000;
     const long long TAIL_TIME_MS = 2000;
 
     mAllProgresses.resize(mTotalNotes);
     for (int i = 0; i < mTotalNotes; ++i) {
-        long long timeToHit = mTimeline[i] - adjustedElapsed;
+        long long timeToHit = mTimeline[i] - elapsedMs;
         float progress = (LEAD_TIME_MS - timeToHit) / (float)(LEAD_TIME_MS + TAIL_TIME_MS);
         progress = std::max(0.0f, std::min(1.0f, progress));
         mAllProgresses[i] = progress;
@@ -407,9 +403,11 @@ void RhythmEngine::resume() {
 
     long long resumeTime = getCurrentTimeMs();
     long long pauseDuration = resumeTime - mPauseStartTime;
-    mPausedDurationMs += pauseDuration;
+
+    mGameStartTime = mGameStartTime + pauseDuration;
+
     mPaused = false;
 
-    LOGD("Rhythm resumed at %lld, was paused for %lld ms, total paused time: %lld ms",
-         resumeTime, pauseDuration, mPausedDurationMs);
+    LOGD("Rhythm resumed, shifted gameStartTime by %lld ms, new gameStartTime=%lld",
+         pauseDuration, mGameStartTime.load());
 }

@@ -3,6 +3,7 @@ package com.example.rhythmtrainer
 import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -197,7 +198,7 @@ class MainActivity : ComponentActivity() {
             resumeRhythm()
             _isPaused.value = false
 
-            val elapsed = System.currentTimeMillis() - levelStartTime
+            val elapsed = SystemClock.elapsedRealtime() - levelStartTime
             val remaining = totalLevelDuration - elapsed
             if (remaining > 0) {
                 levelCompletionJob?.cancel()

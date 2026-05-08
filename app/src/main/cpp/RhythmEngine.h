@@ -103,8 +103,7 @@ private:
     int calculateScore(int deviationMs);
 
     std::atomic<bool> mPaused{false};
-    long long mPausedDurationMs = 0;      // сколько времени были на паузе (суммарно)
-    long long mPauseStartTime = 0;        // когда началась текущая пауза
+    long long mPauseStartTime = 0;
 
 };
 
