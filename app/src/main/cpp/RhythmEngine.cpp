@@ -223,12 +223,17 @@ void RhythmEngine::processTap(long long tapTimeMs) {
 
 void RhythmEngine::onTap() {
     long long tapTime = getCurrentTimeMs();
-    LOGD("onTap() called at %lld", tapTime);
+    LOGD("onTap() called at %lld, isPlaying=%d, calibrationStartTime=%lld",
+         tapTime, mIsPlaying.load(), mCalibrationStartTime);
 
     if (mCalibrationStartTime != 0 && mIsPlaying) {
+        // В режиме калибровки
         addCalibrationTap();
-    } else {
+    } else if (mIsPlaying) {
+        // Обычный режим игры
         processTap(tapTime);
+    } else {
+        LOGD("Tap ignored - not playing");
     }
 }
 
@@ -291,6 +296,11 @@ void RhythmEngine::setCalibrationOffset(int offsetMs) {
     LOGD("Calibration offset set to %d ms", offsetMs);
 }
 
+void RhythmEngine::setCalibrationCallback(std::function<void(int, int, bool)> callback) {
+    mCalibrationCallback = callback;
+    LOGD("Calibration callback set");
+}
+
 void RhythmEngine::startCalibration(int bpm) {
     LOGD("startCalibration() called, BPM=%d", bpm);
     mCalibrationDeviations.clear();
@@ -318,15 +328,12 @@ void RhythmEngine::stopCalibration() {
             sum += dev;
         }
         mCalibrationAverageDeviation = sum / mCalibrationDeviations.size();
-        LOGD("Calibration complete: %d taps, average deviation = %d ms",
-             (int)mCalibrationDeviations.size(), mCalibrationAverageDeviation);
     } else {
         mCalibrationAverageDeviation = 0;
-        LOGD("Calibration complete: no taps recorded");
     }
 
     if (mCalibrationCallback) {
-        mCalibrationCallback(mCalibrationTapCount, mCalibrationAverageDeviation);
+        mCalibrationCallback(mCalibrationTapCount, mCalibrationAverageDeviation, true);  // завершена!
     }
 
     mCalibrationStartTime = 0;
@@ -349,11 +356,15 @@ void RhythmEngine::addCalibrationTap() {
     mCalibrationDeviations.push_back(deviationMs);
     mCalibrationTapCount++;
 
-    LOGD("Calibration tap: elapsed=%lld, ideal=%lld, dev=%d, total taps=%d",
-         elapsed, idealTimeMs, deviationMs, mCalibrationTapCount);
+    // Вычисляем среднее отклонение на лету
+    int sum = 0;
+    for (int dev : mCalibrationDeviations) {
+        sum += dev;
+    }
+    mCalibrationAverageDeviation = sum / mCalibrationDeviations.size();
 
     if (mCalibrationCallback) {
-        mCalibrationCallback(mCalibrationTapCount, 0);
+        mCalibrationCallback(mCalibrationTapCount, mCalibrationAverageDeviation, false);  // не завершена
     }
 }
 
@@ -390,11 +401,6 @@ void RhythmEngine::updateNotePosition(long long elapsedMs) {
 void RhythmEngine::setNotePositionCallback(std::function<void(int, float)> callback) {
     mNotePositionCallback = callback;
     LOGD("Note position callback set");
-}
-
-void RhythmEngine::setCalibrationCallback(std::function<void(int, int)> callback) {
-    mCalibrationCallback = callback;
-    LOGD("Calibration callback set");
 }
 
 void RhythmEngine::setAllNotesProgressCallback(std::function<void(const std::vector<float>&)> callback) {

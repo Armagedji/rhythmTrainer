@@ -64,8 +64,8 @@ Java_com_example_rhythmtrainer_MainActivity_nativeInit(JNIEnv* env, jobject thiz
         }
     });
 
-    RhythmEngine::getInstance()->setCalibrationCallback([](int tapCount, int avgDeviation) {
-        LOGD("Calibration callback: tapCount=%d, avgDeviation=%d", tapCount, avgDeviation);
+    RhythmEngine::getInstance()->setCalibrationCallback([](int tapCount, int avgDeviation, bool finished) {
+        LOGD("Calibration callback: tapCount=%d, avgDeviation=%d, finished=%d", tapCount, avgDeviation, finished);
         JNIEnv* env = nullptr;
         JavaVM* vm = RhythmEngine::getInstance()->getJavaVM();
 
@@ -79,12 +79,20 @@ Java_com_example_rhythmtrainer_MainActivity_nativeInit(JNIEnv* env, jobject thiz
             vm->AttachCurrentThread(&env, nullptr);
         }
 
-        if (env != nullptr && g_javaObject != nullptr && g_updateCalibrationMethod != nullptr) {
-            env->CallVoidMethod(g_javaObject, g_updateCalibrationMethod, tapCount, avgDeviation);
-            LOGD("Calibration callback sent to Java");
-        } else {
-            LOGD("Cannot send calibration callback: env=%p, obj=%p, method=%p",
-                 env, g_javaObject, g_updateCalibrationMethod);
+        if (env != nullptr && g_javaObject != nullptr) {
+            if (finished) {
+                // Вызываем onCalibrationComplete
+                jclass clazz = env->GetObjectClass(g_javaObject);
+                jmethodID method = env->GetMethodID(clazz, "onCalibrationComplete", "(II)V");
+                if (method != nullptr) {
+                    env->CallVoidMethod(g_javaObject, method, tapCount, avgDeviation);
+                }
+            } else {
+                // Вызываем updateCalibration
+                if (g_updateCalibrationMethod != nullptr) {
+                    env->CallVoidMethod(g_javaObject, g_updateCalibrationMethod, tapCount, avgDeviation);
+                }
+            }
         }
 
         if (attached == JNI_EDETACHED) {

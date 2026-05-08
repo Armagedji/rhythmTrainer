@@ -36,7 +36,7 @@ public:
     void stopCalibration();
     int getCalibrationOffset() const { return mCalibrationOffset; }
     void setCalibrationOffset(int offsetMs);
-    void setCalibrationCallback(std::function<void(int, int)> callback);
+    void setCalibrationCallback(std::function<void(int, int, bool)> callback);
 
     // JVM для callback'ов
     void setJavaVM(JavaVM* vm) { mJavaVM = vm; }
@@ -93,7 +93,7 @@ private:
     int mCalibrationOffset = 0;
     long long mCalibrationStartTime = 0;
     int mCalibrationTapCount = 0;
-    std::function<void(int, int)> mCalibrationCallback;
+    std::function<void(int, int, bool)> mCalibrationCallback;
 
     // JVM
     JavaVM* mJavaVM = nullptr;
@@ -110,6 +110,7 @@ private:
 
     std::function<void()> mLevelCompleteCallback;
     int mNotesPlayed = 0;
+
 
 };
 

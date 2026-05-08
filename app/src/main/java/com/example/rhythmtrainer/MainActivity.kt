@@ -176,17 +176,24 @@ class MainActivity : ComponentActivity() {
         runOnUiThread {
             Log.d(TAG, "updateCalibration: taps=$tapCount, avgDev=$avgDeviation")
             _calibrationTapCount.value = tapCount
+            _calibrationAvgDev.value = avgDeviation
+        }
+    }
+
+    @Suppress("unused")
+    fun onCalibrationComplete(tapCount: Int, avgDeviation: Int) {
+        runOnUiThread {
+            Log.d(TAG, "onCalibrationComplete: taps=$tapCount, avgDev=$avgDeviation")
             if (avgDeviation != 0) {
-                _calibrationAvgDev.value = avgDeviation
                 val offset = -avgDeviation
                 setCalibrationOffset(offset)
                 _calibrationOffset.value = offset
                 settingsStorage.calibrationOffset = offset
                 Log.d(TAG, "Calibration saved: offset=$offset ms")
-                _isCalibrating.value = false
-                _calibrationTapCount.value = 0
-                _calibrationAvgDev.value = 0
             }
+            _isCalibrating.value = false
+            _calibrationTapCount.value = 0
+            _calibrationAvgDev.value = 0
         }
     }
 
