@@ -17,11 +17,12 @@ public:
     void stop();
     bool isPlaying() const { return mIsPlaying; }
     void setBpm(int bpm);
-    int getBpm() const { return mCurrentBpm; }
+    void pause();
+    void resume();
+    bool isPaused() const { return mPaused; }
 
     // Игровые методы
     void onTap();
-    int getCurrentScore() const { return mCurrentScore; }
     void resetGame();
     void setScoreUpdateCallback(std::function<void(int, const char*)> callback);
     void setNotePositionCallback(std::function<void(int index, float progress)> callback);
@@ -100,6 +101,9 @@ private:
     void processTap(long long tapTimeMs);
     const char* getResultText(int deviationMs);
     int calculateScore(int deviationMs);
+
+    std::atomic<bool> mPaused{false};
+    long long mPauseStartTime = 0;
 
 };
 
