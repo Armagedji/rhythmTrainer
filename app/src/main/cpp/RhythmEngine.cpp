@@ -90,12 +90,15 @@ void RhythmEngine::restartStream() {
 void RhythmEngine::start(int bpm) {
     LOGD("start() called, BPM=%d", bpm);
 
-    // Загружаем песню с 32 нотами
     loadSong(bpm, 32);
 
     setBpm(bpm);
     resetGame();
     mCurrentNoteIndex = 0;
+
+    mPaused = false;
+    mPausedDurationMs = 0;
+    mPauseStartTime = 0;
 
     if (mIsPlaying) {
         restartStream();
@@ -137,6 +140,9 @@ void RhythmEngine::stop() {
     LOGD("stop() called");
     mIsPlaying = false;
     mNeedsRestart = false;
+
+    mPaused = false;
+    mPausedDurationMs = 0;
 
     if (mStream) {
         mStream->stop();
@@ -182,16 +188,15 @@ int RhythmEngine::calculateScore(int deviationMs) {
 }
 
 void RhythmEngine::processTap(long long tapTimeMs) {
-    if (!mIsPlaying) {
-        LOGD("Tap ignored - game not playing");
+    if (!mIsPlaying || mPaused) {
+        LOGD("Tap ignored - game not playing or paused");
         return;
     }
 
-    // Если это первое нажатие после старта
     if (mGameStartTime == 0) {
         mGameStartTime = tapTimeMs;
         LOGD("First tap, setting gameStartTime to %lld", tapTimeMs);
-        return; // Не оцениваем первое нажатие
+        return;
     }
 
     long long elapsed = tapTimeMs - mGameStartTime;
@@ -200,7 +205,6 @@ void RhythmEngine::processTap(long long tapTimeMs) {
     long long beatNumber = (elapsed + beatDurationMs / 2) / beatDurationMs;
     long long idealTimeMs = beatNumber * beatDurationMs;
 
-    // Учитываем калибровочное смещение
     int deviationMs = (int)(elapsed - idealTimeMs) + mCalibrationOffset;
     LOGD("Tap: offset=%d, final_dev=%d", mCalibrationOffset, deviationMs);
     int score = calculateScore(deviationMs);
@@ -234,7 +238,9 @@ oboe::DataCallbackResult RhythmEngine::onAudioReady(
         void* audioData,
         int32_t numFrames) {
 
-    if (mNeedsRestart) {
+    if (mNeedsRestart || mPaused) {
+        float* output = static_cast<float*>(audioData);
+        memset(output, 0, numFrames * sizeof(float));
         return oboe::DataCallbackResult::Continue;
     }
 
@@ -354,16 +360,16 @@ void RhythmEngine::loadSong(int bpm, int totalNotes) {
 }
 
 void RhythmEngine::updateNotePosition(long long elapsedMs) {
-    if (!mIsPlaying) return;
-    const long long LEAD_TIME_MS = 2000;  // нота видна за 2 секунды до удара
-    const long long TAIL_TIME_MS = 2000;  // и 2 секунды после (симметрично для progress 0.5 в момент удара)
+    if (!mIsPlaying || mPaused) return;
+
+    long long adjustedElapsed = elapsedMs - mPausedDurationMs;
+
+    const long long LEAD_TIME_MS = 2000;
+    const long long TAIL_TIME_MS = 2000;
 
     mAllProgresses.resize(mTotalNotes);
     for (int i = 0; i < mTotalNotes; ++i) {
-        long long timeToHit = mTimeline[i] - elapsedMs;
-        // progress = 0 при timeToHit = LEAD_TIME_MS (появление)
-        // progress = 0.5 при timeToHit = 0 (удар)
-        // progress = 1 при timeToHit = -TAIL_TIME_MS (исчезновение)
+        long long timeToHit = mTimeline[i] - adjustedElapsed;
         float progress = (LEAD_TIME_MS - timeToHit) / (float)(LEAD_TIME_MS + TAIL_TIME_MS);
         progress = std::max(0.0f, std::min(1.0f, progress));
         mAllProgresses[i] = progress;
@@ -386,4 +392,24 @@ void RhythmEngine::setCalibrationCallback(std::function<void(int, int)> callback
 void RhythmEngine::setAllNotesProgressCallback(std::function<void(const std::vector<float>&)> callback) {
     mAllNotesProgressCallback = callback;
     LOGD("All notes progress callback set");
+}
+
+void RhythmEngine::pause() {
+    if (!mIsPlaying || mPaused) return;
+
+    mPaused = true;
+    mPauseStartTime = getCurrentTimeMs();
+    LOGD("Rhythm paused at %lld", mPauseStartTime);
+}
+
+void RhythmEngine::resume() {
+    if (!mIsPlaying || !mPaused) return;
+
+    long long resumeTime = getCurrentTimeMs();
+    long long pauseDuration = resumeTime - mPauseStartTime;
+    mPausedDurationMs += pauseDuration;
+    mPaused = false;
+
+    LOGD("Rhythm resumed at %lld, was paused for %lld ms, total paused time: %lld ms",
+         resumeTime, pauseDuration, mPausedDurationMs);
 }

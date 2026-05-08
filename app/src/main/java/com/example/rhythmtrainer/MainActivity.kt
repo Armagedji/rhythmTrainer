@@ -80,6 +80,9 @@ class MainActivity : ComponentActivity() {
     private external fun setCalibrationOffset(offsetMs: Int)
     private external fun getTotalNotes(): Int
     private external fun setAllNotesProgressCallback()
+    private external fun pauseRhythm()
+    private external fun resumeRhythm()
+    private external fun isRhythmPaused(): Boolean
 
     private val _score = mutableIntStateOf(0)
     private val _lastResult = mutableStateOf("")
@@ -92,6 +95,7 @@ class MainActivity : ComponentActivity() {
     private val _notePositions = mutableStateOf<Map<Int, Float>>(emptyMap())
     private val _noteColors = mutableStateOf<Map<Int, Color>>(emptyMap())
     private val _allProgresses = mutableStateOf(floatArrayOf())
+    private val _isPaused = mutableStateOf(false)
 
     private var currentScreen by mutableStateOf<Screen>(Screen.MainMenu)
     private var currentLevelId by mutableStateOf(1)
@@ -102,6 +106,9 @@ class MainActivity : ComponentActivity() {
     private var dialogHasNextLevel by mutableStateOf(false)
 
     private var levelCompletionJob: Job? = null
+
+    private var levelStartTime: Long = 0L
+    private var totalLevelDuration: Long = 0L
 
     private lateinit var gameResultsStorage: GameResultsStorage
 
@@ -183,6 +190,35 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+
+    fun togglePause() {
+        if (_isPaused.value) {
+            // Возобновляем
+            resumeRhythm()
+            _isPaused.value = false
+
+            val elapsed = System.currentTimeMillis() - levelStartTime
+            val remaining = totalLevelDuration - elapsed
+            if (remaining > 0) {
+                levelCompletionJob?.cancel()
+                levelCompletionJob = lifecycleScope.launch {
+                    delay(remaining)
+                    if (isRhythmPlaying()) {
+                        stopRhythm()
+                        dialogScore = _score.value
+                        dialogHasNextLevel = (currentLevelId < 3)
+                        showResultDialog = true
+                    }
+                }
+            }
+        } else {
+            // Ставим на паузу
+            pauseRhythm()
+            _isPaused.value = true
+            levelCompletionJob?.cancel()
+        }
+    }
+
     private fun setSoundEnabled(enabled: Boolean) {
         val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         if (enabled) {
@@ -212,11 +248,15 @@ class MainActivity : ComponentActivity() {
         _lastResult.value = ""
         _allProgresses.value = floatArrayOf()
         _noteColors.value = emptyMap()
-        startRhythm(bpm)
+        _isPaused.value = false
+
+        levelStartTime = System.currentTimeMillis()
         val beatDurationMs = 60000L / bpm
-        val durationMs = (notesCount - 1) * beatDurationMs
+        totalLevelDuration = (notesCount - 1) * beatDurationMs + 300
+
+        startRhythm(bpm)
         levelCompletionJob = lifecycleScope.launch {
-            delay(durationMs + 300)
+            delay(totalLevelDuration)
             if (isRhythmPlaying()) {
                 stopRhythm()
                 dialogScore = _score.value
@@ -284,6 +324,8 @@ class MainActivity : ComponentActivity() {
                             currentBpm = bpm
                             currentScreen = Screen.GameWithNotes
                         },
+                        isPaused = _isPaused.value,           // ← добавь
+                        onTogglePause = { togglePause() },    // ← добавь
                         onStartLevel = { bpm -> startLevel(bpm) },
                         onStopRhythm = { stopRhythm() },
                         onTap = { onTap() },
@@ -391,7 +433,9 @@ fun NavigationHost(
     onGetTotalNotes: () -> Int,
     allProgresses: FloatArray,
     noteColors: Map<Int, Color>,
-    gameResultsStorage: GameResultsStorage
+    gameResultsStorage: GameResultsStorage,
+    isPaused: Boolean,
+    onTogglePause: () -> Unit
 ) {
     Scaffold { paddingValues ->
         Column(
@@ -439,7 +483,9 @@ fun NavigationHost(
                         onStartLevel = { onStartLevel(currentBpm) },
                         onTap = onTap,
                         allProgresses = allProgresses,
-                        noteColors = noteColors
+                        noteColors = noteColors,
+                        isPaused = isPaused,              // ← новый
+                        onTogglePause = onTogglePause
                     )
                 }
             }
@@ -476,7 +522,9 @@ fun GameScreenWithNotes(
     noteColors: Map<Int, Color>,
     onBack: () -> Unit,
     onStartLevel: () -> Unit,
-    onTap: () -> Unit
+    onTap: () -> Unit,
+    isPaused: Boolean,
+    onTogglePause: () -> Unit
 ) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val screenWidth = maxWidth
@@ -557,6 +605,12 @@ fun GameScreenWithNotes(
                     modifier = Modifier.fillMaxWidth().height(80.dp).padding(top = 8.dp)
                 ) {
                     Text("Нажми в ритм!", fontSize = 20.sp)
+                }
+                Button(
+                    onClick = onTogglePause,
+                    modifier = Modifier.fillMaxWidth().height(60.dp)
+                ) {
+                    Text(if (isPaused) "▶ Продолжить" else "⏸ Пауза", fontSize = 18.sp)
                 }
                 Button(
                     onClick = onBack,
